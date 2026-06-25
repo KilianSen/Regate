@@ -1,0 +1,251 @@
+{
+  "name": "06-inline-ruleset",
+  "request": {
+    "protocol": "1.0",
+    "exercise": {
+      "mode": "transformation",
+      "source": {
+        "type": "frac",
+        "slots": {
+          "denominator": [
+            {
+              "type": "mul",
+              "slots": {
+                "left": [
+                  {
+                    "type": "number",
+                    "value": "3"
+                  }
+                ],
+                "right": [
+                  {
+                    "type": "number",
+                    "value": "1"
+                  }
+                ]
+              }
+            }
+          ],
+          "numerator": [
+            {
+              "type": "mul",
+              "slots": {
+                "left": [
+                  {
+                    "type": "number",
+                    "value": "3"
+                  }
+                ],
+                "right": [
+                  {
+                    "type": "add",
+                    "slots": {
+                      "left": [
+                        {
+                          "type": "variable",
+                          "value": "x"
+                        }
+                      ],
+                      "right": [
+                        {
+                          "type": "number",
+                          "value": "0"
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "target": {
+        "type": "variable",
+        "value": "x"
+      },
+      "ruleset": [
+        {
+          "id": "add_zero_right",
+          "owner": "add",
+          "lhs": {
+            "type": "add",
+            "slots": {
+              "left": [
+                {
+                  "type": "wild",
+                  "value": "a"
+                }
+              ],
+              "right": [
+                {
+                  "type": "number",
+                  "value": "0"
+                }
+              ]
+            }
+          },
+          "rhs": {
+            "type": "wild",
+            "value": "a"
+          },
+          "bidirectional": false,
+          "conditions": []
+        },
+        {
+          "id": "frac_mul_cancel_left",
+          "owner": "frac",
+          "lhs": {
+            "type": "frac",
+            "slots": {
+              "denominator": [
+                {
+                  "type": "mul",
+                  "slots": {
+                    "left": [
+                      {
+                        "type": "wild",
+                        "value": "c"
+                      }
+                    ],
+                    "right": [
+                      {
+                        "type": "wild",
+                        "value": "b"
+                      }
+                    ]
+                  }
+                }
+              ],
+              "numerator": [
+                {
+                  "type": "mul",
+                  "slots": {
+                    "left": [
+                      {
+                        "type": "wild",
+                        "value": "c"
+                      }
+                    ],
+                    "right": [
+                      {
+                        "type": "wild",
+                        "value": "a"
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          },
+          "rhs": {
+            "type": "frac",
+            "slots": {
+              "denominator": [
+                {
+                  "type": "wild",
+                  "value": "b"
+                }
+              ],
+              "numerator": [
+                {
+                  "type": "wild",
+                  "value": "a"
+                }
+              ]
+            }
+          },
+          "bidirectional": false,
+          "conditions": [
+            {
+              "kind": "nonzero",
+              "var": "c"
+            }
+          ]
+        },
+        {
+          "id": "frac_one_denom",
+          "owner": "frac",
+          "lhs": {
+            "type": "frac",
+            "slots": {
+              "denominator": [
+                {
+                  "type": "number",
+                  "value": "1"
+                }
+              ],
+              "numerator": [
+                {
+                  "type": "wild",
+                  "value": "a"
+                }
+              ]
+            }
+          },
+          "rhs": {
+            "type": "wild",
+            "value": "a"
+          },
+          "bidirectional": false,
+          "conditions": []
+        },
+        {
+          "id": "mul_one_right",
+          "owner": "mul",
+          "lhs": {
+            "type": "mul",
+            "slots": {
+              "left": [
+                {
+                  "type": "wild",
+                  "value": "a"
+                }
+              ],
+              "right": [
+                {
+                  "type": "number",
+                  "value": "1"
+                }
+              ]
+            }
+          },
+          "rhs": {
+            "type": "wild",
+            "value": "a"
+          },
+          "bidirectional": false,
+          "conditions": []
+        }
+      ]
+    },
+    "submission": {
+      "final": {
+        "type": "frac",
+        "slots": {
+          "denominator": [
+            {
+              "type": "number",
+              "value": "1"
+            }
+          ],
+          "numerator": [
+            {
+              "type": "variable",
+              "value": "x"
+            }
+          ]
+        }
+      }
+    }
+  },
+  "expect": {
+    "eggregate": {
+      "outcome": "proven_equal",
+      "score": 75
+    },
+    "leanregate": {
+      "outcome": "unknown"
+    }
+  }
+}

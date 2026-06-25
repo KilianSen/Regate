@@ -1,0 +1,35 @@
+name: ci
+on: [push, pull_request]
+
+jobs:
+  eggregate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.13" }
+      - run: pip install -e backends/eggregate
+      - name: test suite
+        run: python backends/eggregate/tests/test_eggregate.py
+      - name: rule-library soundness gate
+        run: cd backends/eggregate && python check_rules.py
+
+  conformance:
+    runs-on: ubuntu-latest
+    needs: eggregate
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.13" }
+      - run: pip install -e backends/eggregate
+      - name: protocol conformance (both backends)
+        run: python conformance/run_conformance.py
+
+  leanregate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: leanprover/lean-action@v1
+        with:
+          lake-package-directory: backends/leanregate
+      # builds & checks backends/leanregate/Leanregate/Basic.lean (the verified rule library)

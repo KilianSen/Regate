@@ -1,0 +1,24 @@
+# Run both grading backends together. Build context is the repo root so each
+# image can vendor the canonical GRADING_PROTOCOL.md.
+services:
+  eggregate:
+    build:
+      context: .
+      dockerfile: backends/eggregate/Dockerfile
+    ports: ["8000:8000"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  leanregate:
+    build:
+      context: .
+      dockerfile: backends/leanregate/Dockerfile
+    ports: ["8001:8000"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 3s
+      retries: 5

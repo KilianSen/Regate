@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/
+
+# Lean
+backends/leanregate/.lake/
+backends/leanregate/build/
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+
+# Eggregate experiment artifacts (the patched 3.15t wheel/source)
+vendor/

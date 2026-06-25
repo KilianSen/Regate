@@ -1,0 +1,91 @@
+{
+  "name": "01-target-form",
+  "request": {
+    "protocol": "1.0",
+    "exercise": {
+      "mode": "transformation",
+      "source": {
+        "type": "frac",
+        "slots": {
+          "denominator": [
+            {
+              "type": "mul",
+              "slots": {
+                "left": [
+                  {
+                    "type": "number",
+                    "value": "3"
+                  }
+                ],
+                "right": [
+                  {
+                    "type": "number",
+                    "value": "1"
+                  }
+                ]
+              }
+            }
+          ],
+          "numerator": [
+            {
+              "type": "mul",
+              "slots": {
+                "left": [
+                  {
+                    "type": "number",
+                    "value": "3"
+                  }
+                ],
+                "right": [
+                  {
+                    "type": "add",
+                    "slots": {
+                      "left": [
+                        {
+                          "type": "variable",
+                          "value": "x"
+                        }
+                      ],
+                      "right": [
+                        {
+                          "type": "number",
+                          "value": "0"
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "target": {
+        "type": "variable",
+        "value": "x"
+      },
+      "rules": [
+        "add_zero_right",
+        "frac_mul_cancel_left",
+        "frac_one_denom",
+        "mul_one_right"
+      ]
+    },
+    "submission": {
+      "final": {
+        "type": "variable",
+        "value": "x"
+      }
+    }
+  },
+  "expect": {
+    "eggregate": {
+      "outcome": "proven_equal",
+      "score": 100
+    },
+    "leanregate": {
+      "outcome": "proven_equal",
+      "score": 100
+    }
+  }
+}

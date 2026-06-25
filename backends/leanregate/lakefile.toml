@@ -1,0 +1,9 @@
+name = "leanregate"
+defaultTargets = ["Leanregate"]
+
+[[require]]
+name = "mathlib"
+scope = "leanprover-community"
+
+[[lean_lib]]
+name = "Leanregate"

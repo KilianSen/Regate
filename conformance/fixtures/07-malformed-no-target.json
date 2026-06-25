@@ -1,0 +1,85 @@
+{
+  "name": "07-malformed-no-target",
+  "request": {
+    "protocol": "1.0",
+    "exercise": {
+      "mode": "transformation",
+      "source": {
+        "type": "frac",
+        "slots": {
+          "denominator": [
+            {
+              "type": "mul",
+              "slots": {
+                "left": [
+                  {
+                    "type": "number",
+                    "value": "3"
+                  }
+                ],
+                "right": [
+                  {
+                    "type": "number",
+                    "value": "1"
+                  }
+                ]
+              }
+            }
+          ],
+          "numerator": [
+            {
+              "type": "mul",
+              "slots": {
+                "left": [
+                  {
+                    "type": "number",
+                    "value": "3"
+                  }
+                ],
+                "right": [
+                  {
+                    "type": "add",
+                    "slots": {
+                      "left": [
+                        {
+                          "type": "variable",
+                          "value": "x"
+                        }
+                      ],
+                      "right": [
+                        {
+                          "type": "number",
+                          "value": "0"
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "rules": [
+        "add_zero_right",
+        "frac_mul_cancel_left",
+        "frac_one_denom",
+        "mul_one_right"
+      ]
+    },
+    "submission": {
+      "final": {
+        "type": "variable",
+        "value": "x"
+      }
+    }
+  },
+  "expect": {
+    "eggregate": {
+      "error": true
+    },
+    "leanregate": {
+      "error": true
+    }
+  }
+}
