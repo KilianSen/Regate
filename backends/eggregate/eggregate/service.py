@@ -111,8 +111,37 @@ def _parse_hypotheses(ex) -> set:
         node = from_json(h)
         if node.op != "eq":
             raise RequestError("each hypothesis must be an equality (eq) expression")
+        # Equality is symmetric: a hypothesis may be substituted either way.
         hyps.add((node.slot("left"), node.slot("right")))
+        hyps.add((node.slot("right"), node.slot("left")))
     return hyps
+
+
+def _prove_lemmas(lemmas, by_id, base_hyps, assumptions):
+    """Prove the student's auxiliary lemmas (`have L = R := <derivation>`) and add
+    each established equality -- in both directions -- to the Type-B scope.
+
+    A lemma is a self-contained sub-derivation from its own ``source`` L; whatever
+    it validly reduces to is R, and ``L = R`` becomes available to later lemmas and
+    to the main proof. Soundness is preserved: an equality is added only once its
+    derivation type-checks (every step valid, guards discharged). Returns
+    ``(hyps, error)``; ``error`` is non-None if a lemma fails to derive.
+    """
+    hyps = set(base_hyps)
+    for i, lem in enumerate(lemmas):
+        if "source" not in lem:
+            return frozenset(hyps), f"lemma {i} has no source"
+        start = from_json(lem["source"])
+        moves = _moves_from_steps(lem.get("steps", []), by_id, frozenset(hyps))
+        report = verify_chain(start, moves, None, assumptions=assumptions)
+        if not report.valid:
+            bad = len(report.results) - 1
+            reason = report.results[bad].reason if report.results else "no valid step"
+            return frozenset(hyps), f"lemma {i} step {bad}: {reason}"
+        result = report.states[-1]
+        hyps.add((start, result))
+        hyps.add((result, start))
+    return frozenset(hyps), None
 
 
 def grade(request: dict) -> dict:
@@ -152,7 +181,18 @@ def grade(request: dict) -> dict:
     assumptions = _parse_assumptions(ex)
     hyps = _parse_hypotheses(ex)
 
-    resp = _grade_core(source, target, rules, by_id, sub, opts, ref, assumptions, hyps)
+    # Prove any auxiliary lemmas first; each established equality joins the Type-B
+    # scope for the main derivation (a derived equality, reusable later).
+    lemma_error = None
+    if sub.get("lemmas"):
+        hyps, lemma_error = _prove_lemmas(sub["lemmas"], by_id, hyps, assumptions)
+
+    if lemma_error:
+        resp = {"outcome": "invalid_derivation", "score": 0, "certified": False,
+                "proof": None, "witness": None, "steps": None, "hint": None,
+                "feedback": f"invalid lemma — {lemma_error}", "meta": {}}
+    else:
+        resp = _grade_core(source, target, rules, by_id, sub, opts, ref, assumptions, hyps)
     resp.update(protocol=PROTOCOL, backend=BACKEND, backend_version=VERSION)
     resp.setdefault("meta", {})["ms"] = round((perf_counter() - t0) * 1e3, 1)
     return resp

@@ -1,0 +1,162 @@
+{
+  "name": "17-derived-lemma-reuse",
+  "request": {
+    "protocol": "1.0",
+    "exercise": {
+      "mode": "transformation",
+      "source": {
+        "type": "add",
+        "slots": {
+          "left": [
+            {
+              "type": "variable",
+              "value": "a"
+            }
+          ],
+          "right": [
+            {
+              "type": "variable",
+              "value": "b"
+            }
+          ]
+        }
+      },
+      "target": {
+        "type": "add",
+        "slots": {
+          "left": [
+            {
+              "type": "mul",
+              "slots": {
+                "left": [
+                  {
+                    "type": "variable",
+                    "value": "a"
+                  }
+                ],
+                "right": [
+                  {
+                    "type": "number",
+                    "value": "1"
+                  }
+                ]
+              }
+            }
+          ],
+          "right": [
+            {
+              "type": "variable",
+              "value": "b"
+            }
+          ]
+        }
+      },
+      "rules": "ALL"
+    },
+    "submission": {
+      "final": null,
+      "lemmas": [
+        {
+          "source": {
+            "type": "mul",
+            "slots": {
+              "left": [
+                {
+                  "type": "variable",
+                  "value": "a"
+                }
+              ],
+              "right": [
+                {
+                  "type": "number",
+                  "value": "1"
+                }
+              ]
+            }
+          },
+          "steps": [
+            {
+              "rule": "mul_one_right",
+              "path": [],
+              "result": {
+                "type": "variable",
+                "value": "a"
+              }
+            }
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "kind": "B",
+          "path": [
+            0
+          ],
+          "equation": [
+            {
+              "type": "variable",
+              "value": "a"
+            },
+            {
+              "type": "mul",
+              "slots": {
+                "left": [
+                  {
+                    "type": "variable",
+                    "value": "a"
+                  }
+                ],
+                "right": [
+                  {
+                    "type": "number",
+                    "value": "1"
+                  }
+                ]
+              }
+            }
+          ],
+          "result": {
+            "type": "add",
+            "slots": {
+              "left": [
+                {
+                  "type": "mul",
+                  "slots": {
+                    "left": [
+                      {
+                        "type": "variable",
+                        "value": "a"
+                      }
+                    ],
+                    "right": [
+                      {
+                        "type": "number",
+                        "value": "1"
+                      }
+                    ]
+                  }
+                }
+              ],
+              "right": [
+                {
+                  "type": "variable",
+                  "value": "b"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    }
+  },
+  "expect": {
+    "eggregate": {
+      "outcome": "proven_equal",
+      "score": 100
+    },
+    "leanregate": {
+      "outcome": "unknown",
+      "score": null
+    }
+  }
+}

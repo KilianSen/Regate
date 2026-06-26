@@ -60,8 +60,15 @@ Expressions use the persisted **MathNode** JSON shape (Artemis
     "steps": [ { "rule": "id", "path": [1,1],
                  "direction": "forward"|"reverse",
                  "kind": "A"|"B",          // A = rule application, B = Leibniz substitution
-                 "equation": [<MathNode>,<MathNode>]?,  // for kind B (must be a hypothesis)
-                 "result": <MathNode> } ]  | null
+                 "equation": [<MathNode>,<MathNode>]?,  // for kind B (a hypothesis or a proven lemma)
+                 "result": <MathNode> } ]  | null,
+
+    // Auxiliary lemmas proven on the way (`have L = R := <derivation>`). Each is
+    // a self-contained sub-derivation from its own `source` L; whatever it validly
+    // reduces to is R, and the established `L = R` (both directions) joins the
+    // Type-B scope for later lemmas and the main `steps`. A lemma whose derivation
+    // does not type-check establishes nothing -> a step relying on it is rejected.
+    "lemmas": [ { "source": <MathNode>, "steps": [ <step>, ... ] }, ... ]
   }
 }
 ```
