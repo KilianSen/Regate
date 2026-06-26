@@ -78,12 +78,39 @@ Prove **`1^n = 1`** by induction on `n`, with `pow(a,0)→1`, `pow(a,S n)→a·p
   → `mul_one_left` → `1 = 1`. ✓
 - verdict: `equal_no_certificate` (both obligations valid; schema assumed).
 
+## leanregate certification (built)
+
+`lean_induction.py` turns the deferred verdict into a **certified** one. Given the
+induction request it:
+
+1. infers which variables are ℕ (the induction var + any exponents) vs ℚ;
+2. derives a Lean recursive definition from the transmitted `definitions`
+   (`def pw : ℚ → ℕ → ℚ | a,0 => … | a,(n+1) => …`);
+3. emits the theorem and an `induction n with | zero … | succ k ih …` proof;
+4. **kernel-checks it** via `lean_prover._run_lean` (the existing Lean seam).
+
+If Lean accepts → `proven_equal` / `certified: true` (`meta.induction.method = "induction"`).
+If Lean rejects, the goal is outside the supported fragment, or the toolchain is
+absent → `unknown` (never a false grade). So the deployed leanregate container
+(Lean + Mathlib) **certifies** `∀n.P(n)`, while the Lean-free dev/conformance env
+honestly returns `unknown` — fixture `19-induction-valid` expects exactly that.
+
+The generated Lean for `1^n = 1` and `a^(m+n) = a^m·a^n` is the textbook proof
+(verified by inspection; the accept→certified / reject→unknown wiring is verified by
+stubbing the kernel seam). What is *not* verified here is that a live Lean kernel
+accepts the specific emitted source — that needs a Lean toolchain (the leanregate
+image / CI's `lean-action`).
+
+Supported fragment (first slice): a ℚ-valued equality over `+ - * pow succ` literals,
+`pow` defined by its `0`/`succ` rules, the induction variable an exponent. Outside
+that ⇒ `unknown`.
+
 ## Not yet done
 
-- **leanregate certification** — emit a Lean `induction n` proof (with the recursive
-  function defined) and kernel-check it via the existing `_run_lean` seam. This is the
-  payoff that turns the deferred verdict into a certified one.
 - **Frontend** — author an induction exercise and prove the base/step cases (reusing
   the lemma/hypothesis UI).
-- **ℕ-typed variables / general function symbols / a ℕ-aware evaluator** — needed before
-  custom recursive definitions can be safely admitted or fuzz-cross-checked.
+- **General recursive functions** — arbitrary function symbols/arities and ℕ→ℚ
+  coercions (`sum`, `factorial`) beyond the single `pow` block; a ℕ-aware evaluator so
+  eggregate could fuzz-cross-check custom recursive definitions.
+- **A live Lean test** — run `lean_induction.build_source` output through the toolchain
+  in CI to prove the emitted proofs actually kernel-check.

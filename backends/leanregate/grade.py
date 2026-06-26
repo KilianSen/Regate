@@ -23,6 +23,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import lean_check
 import lean_prover
+import lean_induction
 
 PROTOCOL = "1.0"
 BACKEND = "leanregate"
@@ -48,13 +49,20 @@ def grade(request: dict) -> dict:
     ex = request.get("exercise") or {}
     sub = request.get("submission") or {}
 
-    # Induction is exactly where a formal backend should shine — but certifying the
-    # base∧step ⟹ ∀n leap needs a real Lean kernel run (`induction`/`Nat.rec`),
-    # which is not yet wired. Until then, honestly inconclusive (never a false grade).
+    # Induction is exactly where a formal backend earns its keep: certify the
+    # base∧step ⟹ ∀n leap with a real Lean `induction` (Nat.rec) kernel run. If
+    # Lean accepts, the claim is certified; otherwise honestly inconclusive.
     if ex.get("mode") == "induction":
-        return _envelope("unknown", None, False,
-                         feedback="Leanregate: certifying an induction proof requires a Lean "
-                                  "kernel run (Nat.rec) that is not yet wired. Route to review.")
+        res = lean_induction.certify(ex)
+        meta = {"induction": {"method": res.method, "var": ex.get("inductionVar"), "detail": res.detail}}
+        if res.certified:
+            return _envelope("proven_equal", 100, True, meta=meta,
+                             feedback="Certified: ∀n. P(n) proven by Lean induction (Nat.rec).")
+        reason = {"unavailable": "the Lean toolchain is unavailable in this deployment",
+                  "untranslatable": f"the goal is outside the certifiable fragment ({res.detail})",
+                  "rejected": "Lean could not certify the inductive claim"}.get(res.method, res.detail)
+        return _envelope("unknown", None, False, meta=meta,
+                         feedback=f"Leanregate could not certify this induction: {reason}. Route to review.")
     if "source" not in ex:
         raise RequestError("exercise.source is required")
     if ex.get("mode", "transformation") == "transformation" and ex.get("target") is None:
