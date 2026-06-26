@@ -19,7 +19,9 @@ from time import perf_counter
 from .audit import audit_catalogue
 from .catalogue import BY_ID, CATALOGUE, ruleset_from_json
 from .conditions import Assumption
-from .model import MathNode, distance, from_json, pretty, to_json
+from .model import (
+    MathNode, distance, from_json, num, pretty, subst_var, succ, to_json, var,
+)
 from .hints import greedy_hints, shortest_path
 from .reference import guided_hint, progress, reference_from_states
 from .robust import (
@@ -144,6 +146,90 @@ def _prove_lemmas(lemmas, by_id, base_hyps, assumptions):
     return frozenset(hyps), None
 
 
+def _replay_obligation(source, steps_in, by_id, hyps):
+    """Replay one induction obligation (an equation) and report whether it is a
+    valid derivation and whether it closes to a reflexive ``t = t`` tautology.
+    Pure step-validation only -- never the egglog oracle or the ℚ evaluator, so it
+    is sound for `succ`/`pow` and cannot crash on them. Returns
+    (status, steps_out, final) with status in {"invalid","open","closed"}."""
+    moves = _moves_from_steps(steps_in, by_id, hyps)
+    report = verify_chain(source, moves, None, assumptions=frozenset())
+    steps_out = [{"index": i, "status": r.status, "reason": r.reason}
+                 for i, r in enumerate(report.results)]
+    if not report.valid:
+        return "invalid", steps_out, None
+    recomputed = report.states[1:]
+    for i, st in enumerate(steps_in):
+        if st.get("result") is not None and from_json(st["result"]) != recomputed[i]:
+            steps_out[i].update(status="invalid", reason="claimed result does not match the rule output")
+            return "invalid", steps_out, None
+    final = report.states[-1]
+    closed = final.op == "eq" and final.slot("left") == final.slot("right")
+    return ("closed" if closed else "open"), steps_out, final
+
+
+def _grade_induction(ex, sub) -> dict:
+    """Grade a proof by induction over ℕ on ``exercise.inductionVar``.
+
+    Generates the two obligations -- base P(0) and step P(S n) with the induction
+    hypothesis P(n) injected as a Type-B hypothesis (exact-match: sound at the
+    fixed n, never applicable at S n) -- and grades each as an ordinary equational
+    sub-derivation. The base∧step ⟹ ∀n.P(n) leap is the induction *schema*: this
+    backend has no kernel to certify it, so on success it **defers**
+    (`equal_no_certificate`, score null), per the protocol -- it never issues a
+    certified pass for an inductive claim. Recursive definitions are TRUSTED
+    definitions (not ℚ-audited); kernel-certifying them is leanregate's job.
+    """
+    if "goal" not in ex:
+        raise RequestError("induction mode requires exercise.goal")
+    goal = from_json(ex["goal"])
+    if goal.op != "eq":
+        raise RequestError("induction goal must be an equality (eq)")
+    name = ex.get("inductionVar")
+    if not name:
+        raise RequestError("induction mode requires exercise.inductionVar")
+
+    rules, _, _ = _resolve_rules(ex)
+    defs = ruleset_from_json(ex.get("definitions") or [])
+    by_id = {**{r.id: r for r in rules}, **{d.id: d for d in defs}}
+
+    base_steps = (sub.get("base") or {}).get("steps") or []
+    step_steps = (sub.get("step") or {}).get("steps") or []
+
+    # Base: P(0).
+    p0 = subst_var(goal, name, num(0))
+    b_status, b_out, _ = _replay_obligation(p0, base_steps, by_id, frozenset())
+    if b_status == "invalid":
+        return {"outcome": "invalid_derivation", "score": 0, "certified": False,
+                "proof": None, "witness": None, "steps": b_out, "hint": None,
+                "feedback": "base case is not a valid derivation.",
+                "meta": {"induction": {"var": name, "case": "base"}}}
+
+    # Step: P(S n), with the induction hypothesis P(n) available (Type-B only).
+    psucc = subst_var(goal, name, succ(var(name)))
+    ih = frozenset({(goal.slot("left"), goal.slot("right")),
+                    (goal.slot("right"), goal.slot("left"))})
+    s_status, s_out, _ = _replay_obligation(psucc, step_steps, by_id, ih)
+    if s_status == "invalid":
+        return {"outcome": "invalid_derivation", "score": 0, "certified": False,
+                "proof": None, "witness": None, "steps": s_out, "hint": None,
+                "feedback": "step case is not a valid derivation.",
+                "meta": {"induction": {"var": name, "case": "step", "base": "valid"}}}
+
+    meta = {"induction": {"var": name, "base": b_status, "step": s_status, "schema": "assumed"}}
+    if b_status == "closed" and s_status == "closed":
+        return {"outcome": EQUAL_NO_CERTIFICATE, "score": None, "certified": False,
+                "proof": None, "witness": None, "steps": s_out, "hint": None,
+                "feedback": "Base P(0) and step P(n)⇒P(S n) both check; the induction "
+                            "principle is assumed — this backend cannot certify the "
+                            "∀n leap. Route to review or certify with leanregate.",
+                "meta": meta}
+    return {"outcome": UNKNOWN, "score": None, "certified": False,
+            "proof": None, "witness": None, "steps": s_out, "hint": None,
+            "feedback": "An obligation did not reduce to a reflexive a = a; review.",
+            "meta": meta}
+
+
 def grade(request: dict) -> dict:
     t0 = perf_counter()
     if request.get("protocol", PROTOCOL).split(".")[0] != PROTOCOL.split(".")[0]:
@@ -152,6 +238,15 @@ def grade(request: dict) -> dict:
     ex = request.get("exercise") or {}
     sub = request.get("submission") or {}
     mode = ex.get("mode", "transformation")
+
+    # Induction has its own request shape (goal + inductionVar + base/step
+    # sub-derivations) and is graded by the step-validator only.
+    if mode == "induction":
+        resp = _grade_induction(ex, sub)
+        resp.update(protocol=PROTOCOL, backend=BACKEND, backend_version=VERSION)
+        resp.setdefault("meta", {})["ms"] = round((perf_counter() - t0) * 1e3, 1)
+        return resp
+
     rules, by_id, custom = _resolve_rules(ex)
     opts = ex.get("options") or {}
 

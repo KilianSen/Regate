@@ -27,6 +27,11 @@ SLOTS: dict[str, tuple[str, ...]] = {
     "frac": ("denominator", "numerator"),
     "neg": ("inner",),
     "eq": ("left", "right"),
+    # Induction blocks (induction.py): ℕ successor and exponentiation. These are
+    # NOT in the shipped catalogue and never reach the egglog oracle / ℚ evaluator;
+    # induction is graded by the step-validator only.
+    "succ": ("inner",),
+    "pow": ("base", "exponent"),
     # 'wild' is a pattern-only block (wildcards a, b, c); see catalogue.py.
     "wild": (),
 }
@@ -109,6 +114,24 @@ def eq(left: MathNode, right: MathNode) -> MathNode:
     return MathNode("eq", kids=(left, right))
 
 
+def succ(inner: MathNode) -> MathNode:
+    return MathNode("succ", kids=(inner,))
+
+
+def power(base: MathNode, exponent: MathNode) -> MathNode:
+    return MathNode("pow", kids=(base, exponent))
+
+
+def subst_var(node: "MathNode", name: str, replacement: "MathNode") -> "MathNode":
+    """Substitute every ``variable`` named ``name`` with ``replacement`` (used to
+    instantiate an induction goal P(var) at 0 and at S(var))."""
+    if node.op == "variable" and node.value == name:
+        return replacement
+    if not node.kids:
+        return node
+    return MathNode(node.op, node.value, tuple(subst_var(k, name, replacement) for k in node.kids))
+
+
 # ---------------------------------------------------------------------------
 # JSON persistence (the MathNodeConverter shape).
 # ---------------------------------------------------------------------------
@@ -162,6 +185,11 @@ def pretty(node: MathNode) -> str:
         return f"-({pretty(i)})" if i.kids else f"-{pretty(i)}"
     if op == "eq":
         return f"{pretty(node.slot('left'))} = {pretty(node.slot('right'))}"
+    if op == "succ":
+        return f"S({pretty(node.slot('inner'))})"
+    if op == "pow":
+        below = {"add", "sub", "eq", "mul", "frac", "neg"}
+        return f"{_wrap(node.slot('base'), below)}^{_wrap(node.slot('exponent'), below)}"
     raise ValueError(f"cannot render {op}")
 
 

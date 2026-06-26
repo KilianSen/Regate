@@ -47,6 +47,14 @@ def grade(request: dict) -> dict:
         raise RequestError(f"unsupported protocol {request.get('protocol')!r}")
     ex = request.get("exercise") or {}
     sub = request.get("submission") or {}
+
+    # Induction is exactly where a formal backend should shine — but certifying the
+    # base∧step ⟹ ∀n leap needs a real Lean kernel run (`induction`/`Nat.rec`),
+    # which is not yet wired. Until then, honestly inconclusive (never a false grade).
+    if ex.get("mode") == "induction":
+        return _envelope("unknown", None, False,
+                         feedback="Leanregate: certifying an induction proof requires a Lean "
+                                  "kernel run (Nat.rec) that is not yet wired. Route to review.")
     if "source" not in ex:
         raise RequestError("exercise.source is required")
     if ex.get("mode", "transformation") == "transformation" and ex.get("target") is None:

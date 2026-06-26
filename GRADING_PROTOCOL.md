@@ -76,6 +76,32 @@ Expressions use the persisted **MathNode** JSON shape (Artemis
 A backend grades the `steps` derivation when present (per-step soundness), else
 the `final` expression (endpoint equivalence). At least one must be non-null.
 
+### Induction mode
+
+`mode: "induction"` proves `∀n. P(n)` over ℕ. It uses a different shape:
+
+```jsonc
+"exercise": { "mode": "induction",
+  "goal": <eq MathNode>,        // P(n): the equality to prove, parametrized by …
+  "inductionVar": "n",          // …this variable (inducted over ℕ)
+  "rules": [...] | "ALL",       // catalogue rules available in the obligations
+  "definitions": [ <Rule>, ... ] }  // TRUSTED recursive definitions (e.g. pow(a,S n)→a·pow(a,n))
+"submission": {
+  "base": { "steps": [...] },   // a derivation proving P(0)
+  "step": { "steps": [...] } }  // a derivation proving P(S n), with the IH P(n) in scope
+```
+
+The grader instantiates `goal` at `0` (base) and at `S n` (step), injects the
+induction hypothesis `P(n)` as a **Type-B hypothesis** (exact-match — sound at the
+fixed `n`, never applicable at `S n`), and grades each obligation as an ordinary
+equational sub-derivation. **The `base ∧ step ⟹ ∀n.P(n)` leap is the induction
+schema.** An e-graph/equational backend has no kernel to certify it, so on success
+it **defers**: `equal_no_certificate`, `score: null`, `certified: false`, with
+`meta.induction = {base, step, schema:"assumed"}` — it never issues a certified
+pass for an inductive claim. A backend with a proof kernel (leanregate, via
+`Nat.rec`) is what can certify the leap. Recursive `definitions` are trusted
+(definitional), not fuzz-audited like algebraic rules.
+
 ## Rule
 
 A rewrite rule, as exercise data. Patterns/templates are MathNodes that may
