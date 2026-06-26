@@ -18,12 +18,16 @@ Eggregate's `check_rules.py` — it answers the top future-work item in
   condition. **Seeded with several rules; the rest follow the same pattern.**
   *(Not compiled in the scaffolding environment — needs `lake build` with
   Mathlib.)*
-- `grade.py` — a protocol-conforming entrypoint (CLI + HTTP), `backend =
-  "leanregate"`, deployable **today**: it returns well-formed `GradeResponse`s
-  so Artemis can integrate against both backends now, with the formal step-check
-  wired in as `Basic.lean` grows. Until then it grades the decidable part
-  (reaching the target form) and returns `unknown` where a Lean proof is needed —
-  honestly inconclusive, never a false grade (the protocol's contract).
+- `grade.py` + `lean_check.py` — a protocol-conforming entrypoint (CLI + HTTP),
+  `backend = "leanregate"`, deployable **today**. `lean_check` is the formal
+  step-checker: it certifies a submitted derivation by checking each step is an
+  instance of a lemma **proven in `Basic.lean`** (its `PROVEN` table mirrors the
+  file one-for-one), and attaches the Lean lemma names as the proof. A step that
+  needs a side condition Lean would demand (the guarded fraction rules), an
+  unknown rule, or value-equivalence without a derivation returns `unknown` —
+  honestly inconclusive, never a false grade (the protocol's contract). The
+  Python checker runs today; `Basic.lean` is the soundness proof of the rules it
+  trusts (compile it with `lake build`).
 
 ## Run / deploy
 

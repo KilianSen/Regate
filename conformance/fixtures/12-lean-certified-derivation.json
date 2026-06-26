@@ -1,0 +1,54 @@
+{
+  "name": "12-lean-certified-derivation",
+  "request": {
+    "protocol": "1.0",
+    "exercise": {
+      "mode": "transformation",
+      "source": {
+        "type": "add",
+        "slots": {
+          "left": [
+            {
+              "type": "variable",
+              "value": "x"
+            }
+          ],
+          "right": [
+            {
+              "type": "number",
+              "value": "0"
+            }
+          ]
+        }
+      },
+      "target": {
+        "type": "variable",
+        "value": "x"
+      },
+      "rules": "ALL"
+    },
+    "submission": {
+      "final": null,
+      "steps": [
+        {
+          "rule": "add_zero_right",
+          "path": [],
+          "result": {
+            "type": "variable",
+            "value": "x"
+          }
+        }
+      ]
+    }
+  },
+  "expect": {
+    "eggregate": {
+      "outcome": "proven_equal",
+      "score": 100
+    },
+    "leanregate": {
+      "outcome": "proven_equal",
+      "score": 100
+    }
+  }
+}

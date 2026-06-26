@@ -1,0 +1,111 @@
+{
+  "name": "15-leibniz-substitution",
+  "request": {
+    "protocol": "1.0",
+    "exercise": {
+      "mode": "transformation",
+      "source": {
+        "type": "add",
+        "slots": {
+          "left": [
+            {
+              "type": "variable",
+              "value": "x"
+            }
+          ],
+          "right": [
+            {
+              "type": "variable",
+              "value": "z"
+            }
+          ]
+        }
+      },
+      "target": {
+        "type": "add",
+        "slots": {
+          "left": [
+            {
+              "type": "variable",
+              "value": "y"
+            }
+          ],
+          "right": [
+            {
+              "type": "variable",
+              "value": "z"
+            }
+          ]
+        }
+      },
+      "rules": "ALL",
+      "hypotheses": [
+        {
+          "type": "eq",
+          "slots": {
+            "left": [
+              {
+                "type": "variable",
+                "value": "x"
+              }
+            ],
+            "right": [
+              {
+                "type": "variable",
+                "value": "y"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "submission": {
+      "final": null,
+      "steps": [
+        {
+          "kind": "B",
+          "path": [
+            0
+          ],
+          "equation": [
+            {
+              "type": "variable",
+              "value": "x"
+            },
+            {
+              "type": "variable",
+              "value": "y"
+            }
+          ],
+          "result": {
+            "type": "add",
+            "slots": {
+              "left": [
+                {
+                  "type": "variable",
+                  "value": "y"
+                }
+              ],
+              "right": [
+                {
+                  "type": "variable",
+                  "value": "z"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    }
+  },
+  "expect": {
+    "eggregate": {
+      "outcome": "proven_equal",
+      "score": 100
+    },
+    "leanregate": {
+      "outcome": "unknown",
+      "score": null
+    }
+  }
+}

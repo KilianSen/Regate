@@ -1,0 +1,74 @@
+{
+  "name": "10-unsound-ruleset-rejected",
+  "request": {
+    "protocol": "1.0",
+    "exercise": {
+      "mode": "transformation",
+      "source": {
+        "type": "frac",
+        "slots": {
+          "denominator": [
+            {
+              "type": "variable",
+              "value": "x"
+            }
+          ],
+          "numerator": [
+            {
+              "type": "variable",
+              "value": "x"
+            }
+          ]
+        }
+      },
+      "target": {
+        "type": "number",
+        "value": "1"
+      },
+      "ruleset": [
+        {
+          "id": "frac_self_one_BROKEN",
+          "owner": "frac",
+          "lhs": {
+            "type": "frac",
+            "slots": {
+              "denominator": [
+                {
+                  "type": "wild",
+                  "value": "a"
+                }
+              ],
+              "numerator": [
+                {
+                  "type": "wild",
+                  "value": "a"
+                }
+              ]
+            }
+          },
+          "rhs": {
+            "type": "number",
+            "value": "1"
+          },
+          "bidirectional": false,
+          "conditions": []
+        }
+      ],
+      "options": {
+        "audit_rules": true,
+        "audit_trials": 200
+      }
+    },
+    "submission": {
+      "final": {
+        "type": "number",
+        "value": "1"
+      }
+    }
+  },
+  "expect": {
+    "eggregate": {
+      "error": true
+    }
+  }
+}

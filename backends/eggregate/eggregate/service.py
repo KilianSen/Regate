@@ -18,7 +18,9 @@ from time import perf_counter
 
 from .audit import audit_catalogue
 from .catalogue import BY_ID, CATALOGUE, ruleset_from_json
+from .conditions import Assumption
 from .model import MathNode, distance, from_json, pretty, to_json
+from .hints import greedy_hints, shortest_path
 from .reference import guided_hint, progress, reference_from_states
 from .robust import (
     EQUAL_NO_CERTIFICATE, PROVEN_EQUAL, PROVEN_UNEQUAL, UNKNOWN,
@@ -70,13 +72,16 @@ def _step_to_json(s) -> dict:
     }
 
 
-def _moves_from_steps(steps, by_id) -> list[Move]:
+def _moves_from_steps(steps, by_id, hyps) -> list[Move]:
+    """Build Moves. A Type-B (Leibniz) step is in scope only if its equation is
+    one of the exercise's given hypotheses -- otherwise a student could substitute
+    with a false equation and "prove" anything."""
     moves = []
     for s in steps:
         path = tuple(s.get("path", []))
         if s.get("kind", "A") == "B":
-            lhs, rhs = s["equation"]
-            moves.append(Move("B", path, equation=Equation(from_json(lhs), from_json(rhs))))
+            lhs, rhs = from_json(s["equation"][0]), from_json(s["equation"][1])
+            moves.append(Move("B", path, equation=Equation(lhs, rhs), in_scope=(lhs, rhs) in hyps))
         else:
             rid = s["rule"]
             if rid not in by_id:
@@ -84,6 +89,30 @@ def _moves_from_steps(steps, by_id) -> list[Move]:
             moves.append(Move("A", path, rule=by_id[rid],
                               reverse=(s.get("direction") == "reverse")))
     return moves
+
+
+def _parse_assumptions(ex) -> frozenset:
+    """Student/instructor-declared facts that discharge guarded side conditions,
+    e.g. {"kind": "nonzero", "value": <MathNode for x>} for "x != 0"."""
+    out = set()
+    for a in ex.get("assumptions") or []:
+        try:
+            out.add(Assumption(a["kind"], from_json(a["value"])))
+        except (KeyError, TypeError) as e:
+            raise RequestError(f"invalid assumption: {e}")
+    return frozenset(out)
+
+
+def _parse_hypotheses(ex) -> set:
+    """Given equalities the student may use in Type-B substitutions -> a set of
+    (lhs, rhs) MathNode pairs."""
+    hyps = set()
+    for h in ex.get("hypotheses") or []:
+        node = from_json(h)
+        if node.op != "eq":
+            raise RequestError("each hypothesis must be an equality (eq) expression")
+        hyps.add((node.slot("left"), node.slot("right")))
+    return hyps
 
 
 def grade(request: dict) -> dict:
@@ -120,7 +149,10 @@ def grade(request: dict) -> dict:
     if ex.get("reference"):
         ref = reference_from_states([from_json(s) for s in ex["reference"]])
 
-    resp = _grade_core(source, target, rules, by_id, sub, opts, ref)
+    assumptions = _parse_assumptions(ex)
+    hyps = _parse_hypotheses(ex)
+
+    resp = _grade_core(source, target, rules, by_id, sub, opts, ref, assumptions, hyps)
     resp.update(protocol=PROTOCOL, backend=BACKEND, backend_version=VERSION)
     resp.setdefault("meta", {})["ms"] = round((perf_counter() - t0) * 1e3, 1)
     return resp
@@ -132,17 +164,18 @@ def _invalid(steps_out, idx, reason) -> dict:
             "feedback": f"step {idx} invalid: {reason}"}
 
 
-def _grade_core(source, target, rules, by_id, sub, opts, ref) -> dict:
+def _grade_core(source, target, rules, by_id, sub, opts, ref, assumptions=frozenset(), hyps=frozenset()) -> dict:
     steps_out = None
     final = None
 
     # 1) a submitted derivation: each step must be a valid rule application AND
     #    its claimed result must match what the rule actually produces (the
-    #    thesis's RewriteChainGrader check (iii)).
+    #    thesis's RewriteChainGrader check (iii)). Guarded steps are discharged
+    #    against the declared `assumptions`; Type-B steps must use a hypothesis.
     if sub.get("steps"):
         steps_in = sub["steps"]
-        moves = _moves_from_steps(steps_in, by_id)
-        report = verify_chain(source, moves, target)
+        moves = _moves_from_steps(steps_in, by_id, hyps)
+        report = verify_chain(source, moves, target, assumptions=assumptions)
         steps_out = [{"index": i, "status": r.status, "reason": r.reason}
                      for i, r in enumerate(report.results)]
         if not report.valid:
@@ -164,21 +197,77 @@ def _grade_core(source, target, rules, by_id, sub, opts, ref) -> dict:
 
     if final is None:
         final = from_json(sub["final"])
-    if target is None:                                 # equation mode: not yet supported
-        return {"outcome": UNKNOWN, "score": None, "certified": False, "proof": None,
-                "witness": None, "steps": steps_out, "hint": None,
-                "feedback": "equation mode not yet supported by this backend", "meta": {}}
+    if target is None:                                 # equation mode
+        return _grade_equation(source, final, rules, steps_out)
 
     resp = _grade_final(source, final, target, rules)
     resp["steps"] = steps_out
-    if opts.get("want_hint") and resp["score"] != 100 and ref is not None:
-        h = guided_hint(final, ref, rules)
-        if h.step is not None:
-            resp["hint"] = {"rule": h.step.rule_id, "path": list(h.step.path),
-                            "direction": "forward", "remaining": h.remaining}
+    # Hint toward the goal when the answer is not yet full marks. A reference
+    # derivation steers the hint onto the intended route (§B.4); without one we
+    # still offer the shortest directed next move.
+    if opts.get("want_hint") and resp["score"] != 100:
+        if ref is not None:
+            h = guided_hint(final, ref, rules)
+            if h.step is not None:
+                resp["hint"] = {"rule": h.step.rule_id, "path": list(h.step.path),
+                                "direction": "forward", "remaining": h.remaining}
+        if resp.get("hint") is None:
+            resp["hint"] = _hint_toward(final, target, rules)
     if ref is not None:
         resp.setdefault("meta", {})["progress"] = round(progress(final, ref), 3)
     return resp
+
+
+def _hint_toward(state, target, rules) -> dict | None:
+    """A next-move hint toward ``target`` without an instructor reference.
+
+    Prefers a step on a *shortest* directed path (so ``remaining`` is the true
+    minimal distance); falls back to the greedy one-ply move when the goal is not
+    reachable within the search bound.
+    """
+    plan = shortest_path(state, target, rules)
+    if plan:
+        s = plan[0]
+        return {"rule": s.rule_id, "path": list(s.path), "direction": "forward",
+                "remaining": len(plan)}
+    greedy = greedy_hints(state, target, rules, k=1)
+    if greedy:
+        g = greedy[0]
+        return {"rule": g.rule_id, "path": list(g.path), "direction": "forward",
+                "remaining": None}
+    return None
+
+
+def _grade_equation(source, final, rules, steps_out) -> dict:
+    """Equation mode: the submission proves an equation by showing its two sides
+    are equivalent (e.g. reducing ``x + 0 = x`` to ``x = x``).
+
+    Success is decided on the *final* equation's sides, so a student may either
+    submit a derivation that reaches a reflexive ``a = a`` or a final equation
+    whose sides this backend can prove equivalent under the ruleset.
+    """
+    base = {"proof": None, "witness": None, "steps": steps_out, "hint": None, "meta": {}}
+    if final.op != "eq":
+        return {**base, "outcome": "invalid_derivation", "score": 0, "certified": False,
+                "feedback": "equation mode expects an equality (eq) expression."}
+    lhs, rhs = final.slot("left"), final.slot("right")
+    if lhs == rhs:
+        return {**base, "outcome": PROVEN_EQUAL, "score": 100, "certified": True,
+                "proof": [], "feedback": "Both sides are identical — the equation holds."}
+    v = decide_equivalence(lhs, rhs, rules)
+    if v.outcome == PROVEN_UNEQUAL:
+        return {**base, "outcome": PROVEN_UNEQUAL, "score": 0, "certified": True,
+                "witness": {k: str(val) for k, val in v.witness.items()},
+                "feedback": "The two sides are not equal (counterexample found)."}
+    if v.outcome == PROVEN_EQUAL:
+        return {**base, "outcome": PROVEN_EQUAL, "score": 100, "certified": True,
+                "proof": [_step_to_json(s) for s in (v.proof or [])],
+                "feedback": "The two sides are equivalent — the equation holds."}
+    if v.outcome == EQUAL_NO_CERTIFICATE:
+        return {**base, "outcome": EQUAL_NO_CERTIFICATE, "score": None, "certified": False,
+                "feedback": "Believed to hold but no checkable proof was produced; review."}
+    return {**base, "outcome": UNKNOWN, "score": None, "certified": False,
+            "feedback": "Could not prove or disprove the equation within budget; review."}
 
 
 def _grade_final(source, final, target, rules) -> dict:

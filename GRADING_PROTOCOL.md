@@ -41,6 +41,17 @@ Expressions use the persisted **MathNode** JSON shape (Artemis
     "rules": ["add_zero_right", ...] | "ALL",   // used only if "ruleset" is absent
 
     "reference": [<MathNode>, ...] | null, // optional sample-solution states (source..target)
+
+    // Declared facts that discharge a guarded rule's symbolic side condition,
+    // e.g. {"kind":"nonzero","value": x} lets `frac_self_one` (x/x → 1) fire.
+    // Without the matching assumption such a step is `open` and rejected.
+    "assumptions": [ { "kind": "nonzero"|"positive"|"integer"|"constant",
+                       "value": <MathNode> }, ... ],
+    // Given equalities the student may use in a Type-B substitution. A kind-B
+    // step whose equation is not among these is out of scope (rejected) — this
+    // is what keeps "substitute equals for equals" sound.
+    "hypotheses": [ <eq MathNode>, ... ],
+
     "options": { "partial_credit": true, "bound": 5, "want_hint": false,
                  "audit_rules": false, "audit_trials": 400 }
   },
@@ -49,7 +60,7 @@ Expressions use the persisted **MathNode** JSON shape (Artemis
     "steps": [ { "rule": "id", "path": [1,1],
                  "direction": "forward"|"reverse",
                  "kind": "A"|"B",          // A = rule application, B = Leibniz substitution
-                 "equation": [<MathNode>,<MathNode>]?,  // for kind B
+                 "equation": [<MathNode>,<MathNode>]?,  // for kind B (must be a hypothesis)
                  "result": <MathNode> } ]  | null
   }
 }

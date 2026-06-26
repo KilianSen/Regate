@@ -73,6 +73,8 @@ def check(backend: str, request: dict, expect: dict) -> list[str]:
         fails.append(f"score {resp.get('score')!r} != {expect['score']!r}")
     if expect.get("has_witness") and not resp.get("witness"):
         fails.append("expected a witness, none present")
+    if expect.get("has_hint") and not resp.get("hint"):
+        fails.append("expected a hint, none present")
     return fails
 
 

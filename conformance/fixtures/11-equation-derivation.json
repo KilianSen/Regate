@@ -1,0 +1,79 @@
+{
+  "name": "11-equation-derivation",
+  "request": {
+    "protocol": "1.0",
+    "exercise": {
+      "mode": "equation",
+      "source": {
+        "type": "eq",
+        "slots": {
+          "left": [
+            {
+              "type": "add",
+              "slots": {
+                "left": [
+                  {
+                    "type": "variable",
+                    "value": "x"
+                  }
+                ],
+                "right": [
+                  {
+                    "type": "number",
+                    "value": "0"
+                  }
+                ]
+              }
+            }
+          ],
+          "right": [
+            {
+              "type": "variable",
+              "value": "x"
+            }
+          ]
+        }
+      },
+      "target": null,
+      "rules": "ALL"
+    },
+    "submission": {
+      "final": null,
+      "steps": [
+        {
+          "rule": "add_zero_right",
+          "path": [
+            0
+          ],
+          "result": {
+            "type": "eq",
+            "slots": {
+              "left": [
+                {
+                  "type": "variable",
+                  "value": "x"
+                }
+              ],
+              "right": [
+                {
+                  "type": "variable",
+                  "value": "x"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    }
+  },
+  "expect": {
+    "eggregate": {
+      "outcome": "proven_equal",
+      "score": 100
+    },
+    "leanregate": {
+      "outcome": "proven_equal",
+      "score": 100
+    }
+  }
+}

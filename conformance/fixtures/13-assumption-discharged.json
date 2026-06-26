@@ -1,0 +1,65 @@
+{
+  "name": "13-assumption-discharged",
+  "request": {
+    "protocol": "1.0",
+    "exercise": {
+      "mode": "transformation",
+      "source": {
+        "type": "frac",
+        "slots": {
+          "denominator": [
+            {
+              "type": "variable",
+              "value": "x"
+            }
+          ],
+          "numerator": [
+            {
+              "type": "variable",
+              "value": "x"
+            }
+          ]
+        }
+      },
+      "target": {
+        "type": "number",
+        "value": "1"
+      },
+      "rules": [
+        "frac_self_one"
+      ],
+      "assumptions": [
+        {
+          "kind": "nonzero",
+          "value": {
+            "type": "variable",
+            "value": "x"
+          }
+        }
+      ]
+    },
+    "submission": {
+      "final": null,
+      "steps": [
+        {
+          "rule": "frac_self_one",
+          "path": [],
+          "result": {
+            "type": "number",
+            "value": "1"
+          }
+        }
+      ]
+    }
+  },
+  "expect": {
+    "eggregate": {
+      "outcome": "proven_equal",
+      "score": 100
+    },
+    "leanregate": {
+      "outcome": "unknown",
+      "score": null
+    }
+  }
+}

@@ -1,0 +1,52 @@
+{
+  "name": "14-assumption-missing",
+  "request": {
+    "protocol": "1.0",
+    "exercise": {
+      "mode": "transformation",
+      "source": {
+        "type": "frac",
+        "slots": {
+          "denominator": [
+            {
+              "type": "variable",
+              "value": "x"
+            }
+          ],
+          "numerator": [
+            {
+              "type": "variable",
+              "value": "x"
+            }
+          ]
+        }
+      },
+      "target": {
+        "type": "number",
+        "value": "1"
+      },
+      "rules": [
+        "frac_self_one"
+      ]
+    },
+    "submission": {
+      "final": null,
+      "steps": [
+        {
+          "rule": "frac_self_one",
+          "path": [],
+          "result": {
+            "type": "number",
+            "value": "1"
+          }
+        }
+      ]
+    }
+  },
+  "expect": {
+    "eggregate": {
+      "outcome": "invalid_derivation",
+      "score": 0
+    }
+  }
+}

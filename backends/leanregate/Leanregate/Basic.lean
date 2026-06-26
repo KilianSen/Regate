@@ -38,10 +38,16 @@ theorem mul_one_right   : a * 1 = a                := by ring
 theorem mul_zero_left   : 0 * a = 0                := by ring
 theorem mul_zero_right  : a * 0 = 0                := by ring
 theorem mul_distrib     : a * (b + c) = a * b + a * c := by ring
+theorem mul_distrib_right : (b + c) * a = b * a + c * a := by ring
 
 -- Negation
 theorem neg_neg'        : -(-a) = a                := by ring
+theorem neg_zero        : (-(0 : ℚ)) = 0           := by ring
 theorem add_inverse     : a + (-a) = 0             := by ring
+
+-- Equality is symmetric (the `eq_symm` rewrite); relational, so proven by
+-- `eq_comm` rather than `ring`.
+theorem eq_symm'        : (a = b) ↔ (b = a)        := eq_comm
 
 -- Fraction (guarded: the catalogue's nonzero side conditions)
 theorem frac_one_denom  : a / 1 = a                := by simp
