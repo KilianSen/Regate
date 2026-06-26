@@ -36,6 +36,15 @@ RUN mkdir -p Regate \
     && printf 'import Mathlib.Tactic.Ring\nimport Mathlib.Tactic.FieldSimp\n' > Regate/Warm.lean \
     && lake env lean Regate/Warm.lean
 
+# Gate the image on the induction translator: emit the proofs and kernel-check them
+# here, where the toolchain already lives. A regressed emitter fails the build, so
+# we never ship an image that generates broken Lean. (MUST_PASS asserts; harder
+# goals are best-effort.)
+ENV LEANREGATE_LEAN_PROJECT=/app/leanproj
+COPY backends/leanregate/lean_prover.py backends/leanregate/lean_induction.py \
+     backends/leanregate/check_induction.py ./
+RUN python check_induction.py --require-lean
+
 # ---- stage 2: runtime -----------------------------------------------------
 FROM python:3.13-slim
 ENV ELAN_HOME=/opt/elan PATH=/opt/elan/bin:$PATH \
@@ -48,7 +57,7 @@ COPY --from=lean /app/leanproj /app/leanproj
 
 WORKDIR /app
 COPY backends/leanregate/grade.py backends/leanregate/lean_check.py \
-     backends/leanregate/lean_prover.py ./
+     backends/leanregate/lean_prover.py backends/leanregate/lean_induction.py ./
 COPY GRADING_PROTOCOL.md ./
 
 EXPOSE 8000
