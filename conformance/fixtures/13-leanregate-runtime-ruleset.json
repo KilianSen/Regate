@@ -1,0 +1,54 @@
+{
+  "name": "13-leanregate-runtime-ruleset",
+  "note": "Inline custom ruleset for the formal backend. Leanregate now PROVES each transmitted rule at request time with a Lean kernel in the container (lean_prover, hybrid ring/field_simp + proof-carrying) instead of rejecting it. The conformance harness runs the Lean-free Python CLI, where the toolchain is unavailable, so leanregate honestly degrades to `unknown` (route to review) rather than grading without a proof. With the Lean container this same request returns proven_equal/certified for the sound rule below; that proven path is exercised by backends/leanregate/tests/test_lean_prover.py (Lean mocked) and by the container in CI.",
+  "request": {
+    "protocol": "1.0",
+    "exercise": {
+      "mode": "transformation",
+      "source": {
+        "type": "add",
+        "slots": {
+          "left": [{ "type": "variable", "value": "x" }],
+          "right": [{ "type": "variable", "value": "y" }]
+        }
+      },
+      "target": {
+        "type": "add",
+        "slots": {
+          "left": [{ "type": "variable", "value": "y" }],
+          "right": [{ "type": "variable", "value": "x" }]
+        }
+      },
+      "ruleset": [
+        {
+          "id": "my_add_comm",
+          "owner": "add",
+          "lhs": {
+            "type": "add",
+            "slots": {
+              "left": [{ "type": "wild", "value": "a" }],
+              "right": [{ "type": "wild", "value": "b" }]
+            }
+          },
+          "rhs": {
+            "type": "add",
+            "slots": {
+              "left": [{ "type": "wild", "value": "b" }],
+              "right": [{ "type": "wild", "value": "a" }]
+            }
+          },
+          "bidirectional": true,
+          "conditions": []
+        }
+      ]
+    },
+    "submission": {
+      "steps": [
+        { "kind": "A", "rule": "my_add_comm", "path": [], "direction": "forward" }
+      ]
+    }
+  },
+  "expect": {
+    "leanregate": { "outcome": "unknown", "score": null }
+  }
+}

@@ -28,6 +28,21 @@ Eggregate's `check_rules.py` — it answers the top future-work item in
   honestly inconclusive, never a false grade (the protocol's contract). The
   Python checker runs today; `Basic.lean` is the soundness proof of the rules it
   trusts (compile it with `lake build`).
+- `lean_prover.py` — the **runtime prover**, for inline custom rulesets. The
+  built-in rules are proven ahead of time in `Basic.lean`; a transmitted
+  `exercise.ruleset` (from a *trusted* author — instructor, not student) is
+  instead proven **at request time** by a Lean kernel running in the container.
+  Per rule, hybrid: *auto-prove* by translating the MathNode `lhs`/`rhs` (+
+  `conditions` as hypotheses) into a `ℚ`-identity goal and discharging it with
+  `field_simp; ring` (the whole catalogue is in this fragment, so a sound rule
+  proves itself and an unsound one — a missing `≠ 0` guard — is **rejected**);
+  else *proof-carrying*, kernel-checking a `proof` tactic block the rule may ship
+  (for rules outside the ring/field fragment). A rule Lean accepts certifies
+  steps under it; one it rejects, or one with no proof, is dropped — steps using
+  it grade `unknown`. Proven outcomes per rule are reported in `meta.ruleset`.
+  Soundness still bottoms out in the Lean kernel, never the author's word.
+  Without the toolchain (e.g. the Lean-free conformance CLI) an inline ruleset
+  degrades to `unknown` — honest, never a false grade.
 
 ## Run / deploy
 
@@ -43,7 +58,8 @@ docker build -t leanregate .    # OCI image (Lean toolchain + wrapper)
 | | Eggregate | Leanregate |
 |---|---|---|
 | Equivalence | equality saturation (e-graph) | Lean-checked rule applications |
-| Soundness of rules | fuzzed (`check_rules.py`) | **proven** (`Basic.lean`) |
+| Soundness of rules | fuzzed (`check_rules.py`) | **proven** — built-ins in `Basic.lean`, transmitted rulesets by the runtime kernel (`lean_prover.py`) |
+| Custom rule on the wire | audited (fuzzed), then trusted | **kernel-proven** per rule, else `unknown` |
 | Speed | ms, scales to small terms | slower (invokes Lean) |
 | Certificate | re-checkable proof chain | Lean proof term |
 | Protocol | `GRADING_PROTOCOL.md` | **same** |
