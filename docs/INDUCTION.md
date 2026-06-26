@@ -112,5 +112,13 @@ that ⇒ `unknown`.
 - **General recursive functions** — arbitrary function symbols/arities and ℕ→ℚ
   coercions (`sum`, `factorial`) beyond the single `pow` block; a ℕ-aware evaluator so
   eggregate could fuzz-cross-check custom recursive definitions.
-- **A live Lean test** — run `lean_induction.build_source` output through the toolchain
-  in CI to prove the emitted proofs actually kernel-check.
+
+## Live Lean check (CI)
+
+`backends/leanregate/check_induction.py` feeds the *emitted* proofs through a real
+Lean toolchain (`python check_induction.py --require-lean`) and asserts the MUST_PASS
+goals (currently `1^n = 1`) kernel-check; harder goals (`a^(m+n)=a^m·a^n`,
+`a^n·b^n=(a·b)^n`) run as non-fatal best-effort (promote once green). The CI
+`leanregate` job runs it after `lean-action` builds the Mathlib-backed project, so the
+generated `induction n` proofs are proven to compile, not just inspected. Run without
+`--require-lean` it skips cleanly where Lean is absent.

@@ -29,7 +29,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.13" }
       - uses: leanprover/lean-action@v1
         with:
           lake-package-directory: backends/leanregate
       # builds & checks backends/leanregate/Leanregate/Basic.lean (the verified rule library)
+      - name: emitted induction proofs kernel-check (live Lean)
+        working-directory: backends/leanregate
+        env:
+          LEANREGATE_LEAN_PROJECT: ${{ github.workspace }}/backends/leanregate
+        run: python check_induction.py --require-lean

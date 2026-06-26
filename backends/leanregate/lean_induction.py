@@ -161,7 +161,10 @@ def build_source(ex: dict) -> str:
     binders += f" ({' '.join(n_vars)} : ℕ)"
     intro = " ".join(q_vars + n_vars)
     return (
-        "import Mathlib\n\n"
+        # Same imports the proven rule library (Basic.lean) compiles with, so they
+        # are guaranteed present in the build cache: ℚ + the tactic suite.
+        "import Mathlib.Data.Rat.Defs\n"
+        "import Mathlib.Tactic\n\n"
         f"{pow_def}\n"
         f"theorem {THEOREM} :∀{binders}, {lhs} = {rhs} := by\n"
         f"  intro {intro}\n"
