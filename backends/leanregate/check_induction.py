@@ -43,16 +43,16 @@ def ex(goal):
 
 
 # Goals whose emitted proof MUST kernel-check (CI fails otherwise).
+# All three verified against Lean 4.15 + Mathlib.
 MUST_PASS = [
     ("1^n = 1", ex(eq(powr(num(1), vr("n")), num(1)))),
-]
-# Exploratory — logged, never fatal (promote to MUST_PASS once confirmed in CI).
-BEST_EFFORT = [
     ("a^(m+n) = a^m * a^n",
      ex(eq(powr(vr("a"), add(vr("m"), vr("n"))), mul(powr(vr("a"), vr("m")), powr(vr("a"), vr("n")))))),
     ("a^n * b^n = (a*b)^n",
      ex(eq(mul(powr(vr("a"), vr("n")), powr(vr("b"), vr("n"))), powr(mul(vr("a"), vr("b")), vr("n"))))),
 ]
+# Exploratory — logged, never fatal (promote to MUST_PASS once confirmed in CI).
+BEST_EFFORT: list = []
 
 
 def main() -> int:

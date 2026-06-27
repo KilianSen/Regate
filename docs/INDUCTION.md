@@ -30,8 +30,8 @@ step-validator.
   **inert** on a symbolic exponent (its `S n` pattern never matches a bare `n`) — so
   even unbounded saturation proves nothing universal. eggregate therefore **defers**
   on a (correct) inductive claim: `equal_no_certificate` / `score: null` /
-  `certified: false`, never a certified pass. (`leanregate`'s `Nat.rec` is what can
-  certify the leap; it currently returns `unknown` until that kernel run is wired.)
+  `certified: false`, never a certified pass. (`leanregate`'s `Nat.rec` is what
+  certifies the leap — wired in `lean_induction.py`; see below.)
 
 This split — *grade each case soundly, defer the schema* — is the cleanest
 illustration yet of why two backends exist.
@@ -65,7 +65,8 @@ all honored here:
   catalogue; never reach the oracle/evaluator.
 - `service.py`: `_grade_induction` / `_replay_obligation` — validator-only obligation
   grading with the IH as a Type-B hypothesis and the deferral verdict.
-- `grade.py` (leanregate): `induction` mode → `unknown` (honest; awaiting a kernel run).
+- `grade.py` (leanregate): `induction` mode → `lean_induction.certify` (a real Lean
+  `induction n` kernel run); certified → `proven_equal`, else honest `unknown`.
 - `GRADING_PROTOCOL.md`: the `induction` request shape.
 - Conformance: `19-induction-valid`, `20-induction-circular-ih`.
 
@@ -95,11 +96,13 @@ absent → `unknown` (never a false grade). So the deployed leanregate container
 (Lean + Mathlib) **certifies** `∀n.P(n)`, while the Lean-free dev/conformance env
 honestly returns `unknown` — fixture `19-induction-valid` expects exactly that.
 
-The generated Lean for `1^n = 1` and `a^(m+n) = a^m·a^n` is the textbook proof
-(verified by inspection; the accept→certified / reject→unknown wiring is verified by
-stubbing the kernel seam). What is *not* verified here is that a live Lean kernel
-accepts the specific emitted source — that needs a Lean toolchain (the leanregate
-image / CI's `lean-action`).
+The generated `induction n` proofs for `1^n = 1`, `a^(m+n) = a^m·a^n`, and
+`a^n·b^n = (a·b)^n` have been **run through a real Lean v4.32.0-rc1 + Mathlib kernel** (not
+just inspected): `check_induction.py --require-lean` feeds the emitter's output to
+`lean_prover._run_lean` and all three compile. The accept→certified /
+reject→unknown wiring is exercised the same way. So the live kernel genuinely
+accepts the emitted source — what remains environment-gated is only *having* the
+toolchain (the leanregate image / CI's `lean-action` / a local `elan` install).
 
 Supported fragment (first slice): a ℚ-valued equality over `+ - * pow succ` literals,
 `pow` defined by its `0`/`succ` rules, the induction variable an exponent. Outside
@@ -117,8 +120,17 @@ that ⇒ `unknown`.
 
 `backends/leanregate/check_induction.py` feeds the *emitted* proofs through a real
 Lean toolchain (`python check_induction.py --require-lean`) and asserts the MUST_PASS
-goals (currently `1^n = 1`) kernel-check; harder goals (`a^(m+n)=a^m·a^n`,
-`a^n·b^n=(a·b)^n`) run as non-fatal best-effort (promote once green). The CI
-`leanregate` job runs it after `lean-action` builds the Mathlib-backed project, so the
-generated `induction n` proofs are proven to compile, not just inspected. Run without
-`--require-lean` it skips cleanly where Lean is absent.
+goals kernel-check. All three currently-supported goals are MUST_PASS and verified
+green on Lean v4.32.0-rc1 + Mathlib: `1^n = 1`, `a^(m+n) = a^m·a^n`, `a^n·b^n = (a·b)^n`
+(the `BEST_EFFORT` list is now empty). The CI `leanregate` job runs it after
+`lean-action` builds the Mathlib-backed project, and the leanregate Docker image runs
+it in its Lean build stage (`RUN python check_induction.py --require-lean`) — so a
+regressed emitter fails both CI and the image build, never shipping broken Lean. Run
+without `--require-lean` it skips cleanly where Lean is absent.
+
+The `succ`-case proof tactic (in `lean_induction.build_source`) is: unfold `pw` and
+normalise the exponent (`simp only [pw, Nat.add_eq]`), then `first` over a forward IH
+rewrite (`rw [ih]; ring`, closes `1^n`/`a^(m+n)`) and a backward fold
+(`rw [← ih]; ring`, closes `a^n·b^n` by folding the product under one `pow`), with
+`simp`-based variants and `simp_all` as fallbacks. The fold is reached only after the
+forward rewrite fails, so it never loops on an IH with a literal RHS.

@@ -170,8 +170,19 @@ def build_source(ex: dict) -> str:
         f"  intro {intro}\n"
         f"  induction {var} with\n"
         f"  | zero => first | simp_all [{FUN}] | (simp [{FUN}]; ring) | ring\n"
-        f"  | succ {fresh} {ihn} => first | simp_all [{FUN}, {ihn}] "
-        f"| (simp [{FUN}, {ihn}]; ring) | (simp only [{FUN}]; rw [{ihn}]; ring)\n"
+        # Unfold `pw` and normalise the `m.add k` that a `m + (k+1)` exponent leaves
+        # back to `m + k` (`Nat.add_eq`), so the forward IH rewrite matches. Then try,
+        # cheapest first: forward `rw [{ihn}]` (closes e.g. `1ⁿ=1`, `aᵐ⁺ⁿ=aᵐ·aⁿ`),
+        # then the backward fold `rw [← {ihn}]` (closes `aⁿ·bⁿ=(a·b)ⁿ` by folding the
+        # product under one `pow`). The fold is reached ONLY after the forward rewrite
+        # fails, so it never loops on a goal whose IH has a literal RHS. All branches
+        # are sound; `first` takes whichever closes. (Verified on Lean v4.32.0-rc1 + Mathlib.)
+        f"  | succ {fresh} {ihn} => simp only [{FUN}, Nat.add_eq]; first"
+        f" | (rw [{ihn}]; ring)"
+        f" | (rw [← {ihn}]; ring)"
+        f" | (simp only [{ihn}]; ring)"
+        f" | (simp only [← {ihn}]; ring)"
+        f" | simp_all [{FUN}, {ihn}]\n"
     )
 
 
