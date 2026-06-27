@@ -50,6 +50,9 @@ MUST_PASS = [
      ex(eq(powr(vr("a"), add(vr("m"), vr("n"))), mul(powr(vr("a"), vr("m")), powr(vr("a"), vr("n")))))),
     ("a^n * b^n = (a*b)^n",
      ex(eq(mul(powr(vr("a"), vr("n")), powr(vr("b"), vr("n"))), powr(mul(vr("a"), vr("b")), vr("n"))))),
+    # IH-free / reflexive: the succ case closes by `simp` alone — guards the
+    # `all_goals` wrapper (without it the trailing tactic errors "no goals").
+    ("2^n = 2^n", ex(eq(powr(num(2), vr("n")), powr(num(2), vr("n"))))),
 ]
 # Exploratory — logged, never fatal (promote to MUST_PASS once confirmed in CI).
 BEST_EFFORT: list = []

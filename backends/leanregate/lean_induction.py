@@ -177,12 +177,15 @@ def build_source(ex: dict) -> str:
         # product under one `pow`). The fold is reached ONLY after the forward rewrite
         # fails, so it never loops on a goal whose IH has a literal RHS. All branches
         # are sound; `first` takes whichever closes. (Verified on Lean v4.32.0-rc1 + Mathlib.)
-        f"  | succ {fresh} {ihn} => simp only [{FUN}, Nat.add_eq]; first"
+        # `all_goals` so the IH-closing block is a no-op when `simp only` already
+        # discharged the goal (e.g. a reflexive or IH-free succ case) — otherwise the
+        # trailing `first` would error with "no goals to be solved".
+        f"  | succ {fresh} {ihn} => simp only [{FUN}, Nat.add_eq]; all_goals (first"
         f" | (rw [{ihn}]; ring)"
         f" | (rw [← {ihn}]; ring)"
         f" | (simp only [{ihn}]; ring)"
         f" | (simp only [← {ihn}]; ring)"
-        f" | simp_all [{FUN}, {ihn}]\n"
+        f" | simp_all [{FUN}, {ihn}])\n"
     )
 
 
