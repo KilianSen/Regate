@@ -7,10 +7,12 @@
 # the kernel proves each one (hybrid ring/field_simp + proof-carrying). The
 # runtime stage copies that toolchain plus the stdlib-only grading entrypoint.
 #
-# NOTE: this image is large (Mathlib oleans) and is built in CI / the registry,
-# not in the scaffold env. Without it the Python CLI still runs and degrades
-# honestly: an inline ruleset returns `unknown` (lean_prover.lean_available()
-# is False), never a false grade.
+# NOTE: this image carries Mathlib oleans and is built in CI / the registry, not
+# in the scaffold env. It is slimmed to the transitive closure of the runtime
+# import surface (`Mathlib.Tactic` + `Rat.Defs`) by prune_lake.py — the full
+# Mathlib olean set is never shipped. Without the toolchain the Python CLI still
+# runs and degrades honestly: an inline ruleset returns `unknown`
+# (lean_prover.lean_available() is False), never a false grade.
 
 # ---- stage 1: Lean toolchain + Mathlib oleans -----------------------------
 FROM python:3.13-slim AS lean
@@ -44,6 +46,14 @@ ENV LEANREGATE_LEAN_PROJECT=/app/leanproj
 COPY backends/leanregate/lean_prover.py backends/leanregate/lean_induction.py \
      backends/leanregate/check_induction.py ./
 RUN python check_induction.py --require-lean
+
+# Slim the cache: `cache get` pulls ALL Mathlib oleans, but the runtime only
+# elaborates the `Mathlib.Tactic` + `Rat.Defs` surface. Delete everything outside
+# that transitive closure (computed by Lean itself), plus .git/.ilean/widget JS.
+# Runs LAST in this stage so the checks above still see the full cache.
+COPY backends/leanregate/prune_lake.py ./
+RUN python prune_lake.py \
+    && rm -rf "$ELAN_HOME"/toolchains/*/share/doc
 
 # ---- stage 2: runtime -----------------------------------------------------
 FROM python:3.13-slim

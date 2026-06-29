@@ -76,7 +76,7 @@ def test_auto_prove_rejects_unsound_rule():
 
 def test_proof_carrying_fallback():
     # auto-prove fails (relational rule), but a supplied proof checks out.
-    fake = _install(lambda body: "import Mathlib\n" in body)  # only the carried file imports full Mathlib
+    fake = _install(lambda body: "import Mathlib.Data.Rat.Defs" in body)  # only the carried file imports the Rat.Defs surface
     r = lean_prover.prove_rule({"id": "eq_symm", "lhs": _bin("eq", A, B),
                                 "rhs": _bin("eq", B, A), "bidirectional": True,
                                 "proof": "exact eq_comm"})

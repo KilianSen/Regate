@@ -171,12 +171,21 @@ def _auto_source(rule: dict) -> str:
 
 
 def _carried_source(rule: dict) -> str:
-    """A Lean file that states the rule and discharges it with the supplied proof."""
+    """A Lean file that states the rule and discharges it with the supplied proof.
+
+    Imports the tactic suite + ℚ defs rather than all of `import Mathlib`. This is
+    the SAME surface as Basic.lean and the induction emitter, which lets the image
+    ship only the transitive olean closure of `Mathlib.Tactic` (see the Dockerfile's
+    prune step) instead of every Mathlib olean. A carried proof keeps the full
+    tactic suite (ring/field_simp/linarith/nlinarith/positivity/norm_num/omega/…);
+    the only thing it loses is citing a Mathlib *named theorem* by name, which the
+    ℚ rational-rewrite rules this path certifies do not need."""
     sig, _ = _goal(rule)
     proof = rule["proof"].rstrip("\n")
     indented = "\n".join("  " + line for line in proof.splitlines())
     return (
-        "import Mathlib\n\n"
+        "import Mathlib.Tactic\n"
+        "import Mathlib.Data.Rat.Defs\n\n"
         f"theorem {THEOREM} : {sig} := by\n"
         f"{indented}\n"
     )
