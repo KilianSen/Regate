@@ -8,73 +8,79 @@ imports and nothing else, so every olean outside that closure is dead weight.
 
 This script:
 
-  1. asks Lean itself for the authoritative transitive module set of the runtime
-     import surface (`#eval … moduleNames`) — no heuristics, no guessing;
-  2. deletes every package olean whose module is not in that set (Tier 2);
-  3. drops `.git` clones, `.ilean` server indices, and ProofWidgets' JS bundles,
-     none of which headless `lake env lean` reads (Tier 1).
+  1. asks Lean *itself* for the authoritative set of olean FILES the runtime
+     import surface loads — via `findOLean`, so it is independent of the on-disk
+     build layout (`.lake/build/lib/` vs `.lake/build/lib/lean/`, which differs
+     across Lean versions). No path→module reconstruction, no guessing.
+  2. deletes every package olean Lean did not load (Tier 2);
+  3. drops `.git` clones, `.ilean` server indices, ProofWidgets' JS bundles (Tier 1);
+  4. SELF-VERIFIES: re-proves a known-sound rule through `lean_prover` after the
+     deletion. If the prune removed something the prover needs, this fails and the
+     Docker build fails — a broken image is never shipped.
 
-It ABORTS without deleting anything if the closure looks implausibly small, so a
-Lean error can never nuke the build cache. stdlib-only.
+It also ABORTS before deleting if the closure looks implausibly small, so a Lean
+error can never nuke the build cache. stdlib-only (besides importing lean_prover,
+which the Dockerfile has already copied alongside this script).
 """
 from __future__ import annotations
 
 import os
-import re
+import shutil
 import subprocess
 import sys
 
 PROJECT = os.environ.get("LEANREGATE_LEAN_PROJECT", "/app/leanproj")
 PACKAGES = os.path.join(PROJECT, ".lake", "packages")
-LIB_MARKER = "/.lake/build/lib/"
 
 # The exact import surface the runtime ever elaborates (superset of every path:
-# _carried_source, _auto_source, lean_induction, Basic.lean).
+# _carried_source, _auto_source, lean_induction, Basic.lean). MUST stay ⊇ the
+# imports emitted by lean_prover._carried_source / lean_induction.
 RUNTIME_IMPORTS = [
     "import Mathlib.Tactic",
     "import Mathlib.Data.Rat.Defs",
     "import Mathlib.Tactic.Ring",
     "import Mathlib.Tactic.FieldSimp",
 ]
-# Mathlib.Tactic's closure is many thousands of modules; refuse to prune if we
-# somehow got far fewer (⇒ Lean errored), rather than delete a half-empty set.
+# Mathlib.Tactic's closure is several thousand modules; refuse to prune if we got
+# far fewer (⇒ Lean errored), rather than delete against a half-empty keep-set.
 MIN_CLOSURE = 1500
 
-_NAME_RE = re.compile(r"^[A-Za-z0-9_.«».]+$")
+
+def _real(p: str) -> str:
+    return os.path.realpath(p)
 
 
-def closure_modules() -> set[str]:
-    """The transitive imported-module set of the runtime surface, per Lean."""
+def closure_olean_paths() -> set[str]:
+    """The exact olean files Lean loads for the runtime surface, as realpaths.
+
+    Asks Lean to resolve every transitively-imported module to its olean via
+    `findOLean`, so the keep-set is file paths Lean itself reports — no
+    assumption about where the build put the oleans."""
     src_dir = os.path.join(PROJECT, "Regate")
     os.makedirs(src_dir, exist_ok=True)
     src = os.path.join(src_dir, "Closure.lean")
     body = (
         "\n".join(RUNTIME_IMPORTS) + "\n\n"
-        "open Lean Elab Command in\n"
+        "open Lean in\n"
         "run_cmd do\n"
         "  for m in (← getEnv).header.moduleNames do\n"
-        "    IO.println m\n"
+        "    IO.println (← Lean.findOLean m)\n"
     )
     with open(src, "w", encoding="utf-8") as fh:
         fh.write(body)
     proc = subprocess.run(
         ["lake", "env", "lean", os.path.relpath(src, PROJECT)],
-        cwd=PROJECT, capture_output=True, text=True, timeout=600,
+        cwd=PROJECT, capture_output=True, text=True, timeout=900,
     )
     if proc.returncode != 0:
-        sys.exit("prune_lake: Lean failed to elaborate the runtime surface:\n"
+        sys.exit("prune_lake: Lean failed to enumerate the runtime closure:\n"
                  + (proc.stderr or proc.stdout))
-    mods = {ln.strip() for ln in proc.stdout.splitlines()
-            if ln.strip() and _NAME_RE.match(ln.strip())}
-    return mods
-
-
-def _module_of(olean_path: str) -> str | None:
-    i = olean_path.find(LIB_MARKER)
-    if i < 0:
-        return None
-    rel = olean_path[i + len(LIB_MARKER):]
-    return rel[:-len(".olean")].replace("/", ".") if rel.endswith(".olean") else None
+    paths = set()
+    for ln in proc.stdout.splitlines():
+        ln = ln.strip()
+        if ln.endswith(".olean") and os.path.exists(ln):
+            paths.add(_real(ln))
+    return paths
 
 
 def _du(path: str) -> int:
@@ -88,60 +94,80 @@ def _du(path: str) -> int:
     return total
 
 
+def _self_verify() -> None:
+    """Re-prove a known-sound rule through the real prover after pruning.
+    `a + b = b + a` exercises the auto-prove path (`import Mathlib.Tactic.Ring`
+    /`FieldSimp`); if the prune broke that import, this fails the build."""
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import lean_prover
+    lean_prover.LEAN_TIMEOUT = float(os.environ.get("LEANREGATE_SELFTEST_TIMEOUT", "600"))
+    wild = lambda v: {"type": "wild", "value": v}
+    add = lambda l, r: {"type": "add", "slots": {"left": [l], "right": [r]}}
+    rule = {"id": "_prune_selftest_add_comm",
+            "lhs": add(wild("a"), wild("b")), "rhs": add(wild("b"), wild("a")),
+            "conditions": []}
+    res = lean_prover.prove_rule(rule)
+    if not res.proven:
+        sys.exit("prune_lake: POST-PRUNE SELF-TEST FAILED — the prover can no "
+                 f"longer prove a+b=b+a (method={res.method}); the prune removed "
+                 f"a needed olean.\n{res.detail}")
+    print(f"prune_lake: self-verify OK (auto-proved a+b=b+a via {res.method})")
+
+
 def main() -> None:
     if not os.path.isdir(PACKAGES):
         sys.exit(f"prune_lake: no packages dir at {PACKAGES}")
     before = _du(PROJECT)
 
-    keep = closure_modules()
+    keep = closure_olean_paths()
     if len(keep) < MIN_CLOSURE:
-        sys.exit(f"prune_lake: closure has only {len(keep)} modules "
+        sys.exit(f"prune_lake: closure has only {len(keep)} oleans "
                  f"(< {MIN_CLOSURE}); refusing to prune.")
-    print(f"prune_lake: runtime closure = {len(keep)} modules")
+    print(f"prune_lake: runtime closure = {len(keep)} oleans")
 
-    # Tier 2: delete oleans (and sibling .ilean) outside the closure.
-    dead_oleans = freed_oleans = 0
+    # Tier 2: delete every package olean (+ sibling .ilean) Lean did not load.
+    dead = freed = 0
     for root, _dirs, files in os.walk(PACKAGES):
         for f in files:
             if not f.endswith(".olean"):
                 continue
             full = os.path.join(root, f)
-            mod = _module_of(full)
-            if mod is None or mod in keep:
+            if _real(full) in keep:
                 continue
             for victim in (full, full[:-len(".olean")] + ".ilean"):
                 if os.path.exists(victim):
-                    freed_oleans += os.path.getsize(victim)
+                    freed += os.path.getsize(victim)
                     os.remove(victim)
-            dead_oleans += 1
-    print(f"prune_lake: removed {dead_oleans} dead oleans")
+            dead += 1
+    print(f"prune_lake: removed {dead} dead oleans")
 
-    # Tier 1: remaining .ilean (server-only), .git clones, ProofWidgets JS.
-    removed_ilean = removed_git = removed_js = 0
-    for root, dirs, files in os.walk(PACKAGES, topdown=True):
-        if ".git" in dirs:
-            import shutil
-            shutil.rmtree(os.path.join(root, ".git"), ignore_errors=True)
-            dirs.remove(".git")
-            removed_git += 1
+    # Tier 1: .ilean (language-server only) and ProofWidgets JS bundles.
+    # NOTE: we deliberately do NOT delete `.lake/packages/*/.git`. lake verifies
+    # each dependency's checkout against its git remote on every `lake env`; with
+    # .git gone it reports "URL has changed" and re-clones the package — wiping the
+    # prebuilt oleans (and needing network). That would break proving at runtime,
+    # not just here. The .git clones are kept so `lake env lean` stays offline.
+    removed_ilean = 0
+    for root, _dirs, files in os.walk(PACKAGES):
         for f in files:
             if f.endswith(".ilean"):
-                p = os.path.join(root, f)
                 try:
-                    os.remove(p); removed_ilean += 1
+                    os.remove(os.path.join(root, f)); removed_ilean += 1
                 except OSError:
                     pass
     pw_js = os.path.join(PACKAGES, "proofwidgets", ".lake", "build", "js")
+    removed_js = 0
     if os.path.isdir(pw_js):
-        import shutil
         removed_js = _du(pw_js)
         shutil.rmtree(pw_js, ignore_errors=True)
-    print(f"prune_lake: removed {removed_git} .git clones, "
-          f"{removed_ilean} stray .ilean, {removed_js // (1024*1024)} MiB ProofWidgets JS")
+    print(f"prune_lake: removed {removed_ilean} .ilean, "
+          f"{removed_js // (1024*1024)} MiB ProofWidgets JS (kept .git for lake)")
 
     after = _du(PROJECT)
     print(f"prune_lake: {before // (1024*1024)} MiB -> {after // (1024*1024)} MiB "
           f"(freed {(before - after) // (1024*1024)} MiB)")
+
+    _self_verify()
 
 
 if __name__ == "__main__":

@@ -44,16 +44,19 @@ RUN mkdir -p Regate \
 # goals are best-effort.)
 ENV LEANREGATE_LEAN_PROJECT=/app/leanproj
 COPY backends/leanregate/lean_prover.py backends/leanregate/lean_induction.py \
-     backends/leanregate/check_induction.py ./
-RUN python check_induction.py --require-lean
+     backends/leanregate/check_induction.py backends/leanregate/prune_lake.py ./
 
 # Slim the cache: `cache get` pulls ALL Mathlib oleans, but the runtime only
-# elaborates the `Mathlib.Tactic` + `Rat.Defs` surface. Delete everything outside
-# that transitive closure (computed by Lean itself), plus .git/.ilean/widget JS.
-# Runs LAST in this stage so the checks above still see the full cache.
-COPY backends/leanregate/prune_lake.py ./
+# elaborates the `Mathlib.Tactic` + `Rat.Defs` surface. Delete every olean Lean
+# does not load for that surface (it enumerates them via findOLean), plus
+# .git/.ilean/widget JS. prune_lake self-verifies the auto-prove path afterwards.
 RUN python prune_lake.py \
     && rm -rf "$ELAN_HOME"/toolchains/*/share/doc
+
+# Gate the image on the induction translator AFTER pruning, so this kernel-check
+# also proves the slimmed olean set still elaborates the induction import surface.
+# A regressed emitter OR an over-aggressive prune fails the build here.
+RUN python check_induction.py --require-lean
 
 # ---- stage 2: runtime -----------------------------------------------------
 FROM python:3.13-slim

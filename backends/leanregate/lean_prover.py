@@ -41,7 +41,11 @@ from dataclasses import dataclass, field
 # Where the prebuilt lake project (with Mathlib oleans) lives in the container.
 # The Dockerfile populates it; unset/missing ⇒ Lean is unavailable.
 LEAN_PROJECT = os.environ.get("LEANREGATE_LEAN_PROJECT", "/app/leanproj")
-LEAN_TIMEOUT = float(os.environ.get("LEANREGATE_LEAN_TIMEOUT", "60"))
+# Cold-loading the Mathlib tactic olean set on the first request takes ~85s in a
+# fresh container (no persistent Lean server; page cache is empty). The default
+# must clear that or every first request times out → `unknown`. Override with
+# LEANREGATE_LEAN_TIMEOUT; warm requests are fast once the page cache is hot.
+LEAN_TIMEOUT = float(os.environ.get("LEANREGATE_LEAN_TIMEOUT", "180"))
 
 
 # ---------------------------------------------------------------------------
