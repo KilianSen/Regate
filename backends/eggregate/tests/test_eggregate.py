@@ -384,6 +384,59 @@ def test_recheck_rejects_tampered_proof():
     assert not recheck_proof(SOURCE, tampered)
 
 
+# -- grown catalogue: negation + fraction rules (Tier 3) --------------------
+def test_new_negation_and_fraction_rules_extend_reach():
+    A, B, C, D = var("a"), var("b"), var("c"), var("d")
+    y = var("y")
+    assert equivalent(neg(add(X, y)), add(neg(X), neg(y)))            # neg_add
+    assert equivalent(mul(neg(X), y), neg(mul(X, y)))                 # mul_neg_left
+    assert equivalent(add(frac(X, C), frac(y, C)), frac(add(X, y), C))  # frac_add_same_denom
+    assert equivalent(mul(frac(A, B), frac(C, D)), frac(mul(A, C), mul(B, D)))  # frac_mul
+
+
+def test_grown_catalogue_still_sound():
+    from eggregate import audit_catalogue
+    audits = audit_catalogue(trials=400)
+    assert len(audits) == 29 and all(a.sound for a in audits)
+
+
+# -- AC normalisation (Tier 3) ----------------------------------------------
+def test_ac_normalize_canonicalises_commutative_associative():
+    from eggregate import ac_normalize
+    y, z = var("y"), var("z")
+    assert ac_normalize(add(y, X)) == ac_normalize(add(X, y))                 # commutativity
+    assert ac_normalize(add(add(X, y), z)) == ac_normalize(add(X, add(y, z)))  # associativity
+    assert ac_normalize(add(X, y)) != ac_normalize(add(X, z))                 # genuinely different
+
+
+def test_service_ac_normalization_accepts_commuted_target():
+    from eggregate.model import to_json
+    from eggregate.service import grade
+    yy = var("y")
+    src, tgt = add(X, yy), add(yy, X)   # x+y  vs target  y+x, no commutativity rule given
+
+    def run(ac):
+        return grade({"protocol": "1.0", "exercise": {
+            "mode": "transformation", "source": to_json(src), "target": to_json(tgt),
+            "rules": ["add_zero_right"], "options": {"ac_normalization": ac}},
+            "submission": {"final": to_json(src)}})
+
+    assert run(False)["outcome"] != "proven_equal"          # can't prove without comm
+    r = run(True)
+    assert r["outcome"] == "proven_equal" and r["score"] == 100 and r["certified"]
+
+
+def test_service_ac_still_disproves_wrong_answer():
+    from eggregate.model import to_json
+    from eggregate.service import grade
+    yy = var("y")
+    r = grade({"protocol": "1.0", "exercise": {
+        "mode": "transformation", "source": to_json(add(X, yy)), "target": to_json(add(X, yy)),
+        "rules": "ALL", "options": {"ac_normalization": True}},
+        "submission": {"final": to_json(add(X, num(1)))}})   # x+1 is not x+y
+    assert r["outcome"] == "proven_unequal" and r["score"] == 0
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in fns:

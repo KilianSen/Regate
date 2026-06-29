@@ -5,8 +5,8 @@ See the bachelor's thesis "Extending Artemis with proof based mathematical
 exercises" (main.pdf), Section 4.5 / 5.7 and Appendix B.
 """
 from .model import (
-    MathNode, add, distance, eq, frac, from_json, mul, neg, num, pretty, sub,
-    to_json, var,
+    MathNode, add, ac_normalize, distance, eq, frac, from_json, mul, neg, num,
+    pretty, sub, to_json, var,
 )
 from .catalogue import CATALOGUE, Rule, rules
 from .conditions import Assumption, SideCondition, discharge
@@ -33,7 +33,7 @@ from .validate import (
 
 __all__ = [
     "MathNode", "add", "sub", "mul", "frac", "neg", "eq", "num", "var",
-    "pretty", "distance", "to_json", "from_json",
+    "pretty", "distance", "ac_normalize", "to_json", "from_json",
     "CATALOGUE", "Rule", "rules",
     "Assumption", "SideCondition", "discharge", "match", "instantiate",
     "EGraphView", "equivalent", "grade", "build_ruleset",

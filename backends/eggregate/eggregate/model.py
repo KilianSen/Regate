@@ -194,6 +194,39 @@ def pretty(node: MathNode) -> str:
 
 
 # ---------------------------------------------------------------------------
+# AC normalisation (mirrors the frontend's expr.normalizeAC): flatten + sort the
+# commutative/associative chains of `+` and `·` into one canonical tree, so two
+# expressions equal up to associativity/commutativity normalise identically.
+# Used only when an exercise sets `options.ac_normalization` -- it never affects
+# step validation, only "is this the target form / are these equal up to AC".
+# ---------------------------------------------------------------------------
+def _struct_key(node: "MathNode") -> str:
+    return f"{node.op}|{node.value or ''}(" + ",".join(_struct_key(k) for k in node.kids) + ")"
+
+
+def ac_normalize(node: "MathNode") -> "MathNode":
+    kids = tuple(ac_normalize(k) for k in node.kids)
+    node = MathNode(node.op, node.value, kids)
+    if node.op in ("add", "mul"):
+        parts: list[MathNode] = []
+
+        def collect(n: MathNode) -> None:
+            if n.op == node.op:
+                for k in n.kids:
+                    collect(k)
+            else:
+                parts.append(n)
+
+        collect(node)
+        parts.sort(key=_struct_key)
+        acc = parts[0]
+        for p in parts[1:]:                       # rebuild as a left-nested chain
+            acc = MathNode(node.op, None, (acc, p))
+        return acc
+    return node
+
+
+# ---------------------------------------------------------------------------
 # The distance metric (service/MathNodeDistance, Appendix B):
 # multiset symmetric difference of all subtrees.
 # ---------------------------------------------------------------------------

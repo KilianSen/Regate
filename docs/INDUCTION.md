@@ -36,6 +36,69 @@ step-validator.
 This split — *grade each case soundly, defer the schema* — is the cleanest
 illustration yet of why two backends exist.
 
+## Grade vs. certify — and when a student submission needs each
+
+**Grade** = produce a verdict (`outcome` + `score`). **Certify** = back a *positive*
+("they're equal") verdict with a machine-recheckable proof (`certified: true`, which
+the protocol *requires* to carry a re-checkable `proof`). Certifying is one possible
+*result* of grading, not a separate step — every request is graded; only some results
+are certified.
+
+For grading student inductions, **certification is not required** — it is a trust
+upgrade, needed in exactly one situation:
+
+- **Certify NOT needed** when a human reviews passes, or the submission is *wrong*, or
+  you only want per-step feedback / partial credit. A wrong obligation gives a sound
+  `invalid_derivation` / `score: 0` (no kernel involved); a correct one gives
+  `equal_no_certificate` / `null` that a tutor signs off. Most classroom grading lives
+  here.
+- **Certify NEEDED** only to **auto-award full credit on a *correct* inductive proof
+  with no human in the loop.** That is the one case eggregate can't serve (no kernel
+  for the schema) and leanregate can (`Nat.rec`, kernel-checked → `proven_equal` /
+  `certified: true`).
+
+### Why the `∀n` leap specifically needs a sign-off
+
+eggregate is sound because every step is *valid by construction* — a rule match or an
+exact-match Type-B substitution — so a **finite** chain yields equivalence by
+transitivity. `∀n. P(n)` is not the endpoint of any finite rewrite chain: it quantifies
+over infinitely many `n`. The inference `base ∧ step ⟹ ∀n. P(n)` **is the induction
+axiom** (Nat.rec / well-founded induction over ℕ) — a primitive of the logic, not a
+theorem derivable from the catalogue rules. eggregate has no representation of that
+axiom and no kernel to re-check it, so it can confirm the two *premises* (the
+obligations) but must *assume* the rule joining them. Honoring its honesty invariant
+(never certify an inference it can't independently re-check), it defers that single gap
+to a human or to leanregate. The two finite obligations need no sign-off; only the
+infinite leap between them does.
+
+### Is eggregate correct on "basic undergrad" inductions?
+
+The limiter is **coverage, not correctness** — eggregate is essentially never
+*confidently wrong*, but the slice it can express is narrower than "all undergrad
+induction":
+
+- **Within its fragment** — *equalities* over `+ − · pow succ`, single-variable
+  structural induction over ℕ, with sound definitions (the sum/product/power-identity
+  exercises) — its obligation-checking is sound by construction, false *positives* are
+  designed out (incl. the circular-IH error, blocked by exact-match Type-B), and the
+  plain-ℕ schema it assumes there is genuinely valid. A `base closed + step closed`
+  result is reliable; signing off on it is safe ~always.
+- **Outside its fragment it defers (`unknown`), it does not mis-grade** —
+  **inequalities** (`2ⁿ > n`, `n! ≥ 2ⁿ`), **strong induction / multiple or shifted base
+  cases**, and **existential / divisibility** goals (`3 ∣ n³−n`) cannot be expressed in
+  the equality-over-arithmetic model at all. A large fraction of undergrad induction is
+  inequalities, so "99% correct" overstates *coverage* even though *correctness* holds
+  where it applies.
+- **One in-fragment caveat:** recursive `definitions` are **trusted, not audited** (see
+  guardrail 3). A wrong/circular definition can make bogus obligations close, so
+  in-fragment correctness is conditional on the definitions being sound — which the
+  course author controls.
+
+Net: for equality inductions over ℕ with correct definitions, eggregate is reliably
+correct and safe to sign off. It trades coverage for never being confidently wrong
+(`unknown` instead of a guess) — which is the design intent, and exactly why leanregate
+exists to certify the cases that must be trusted automatically.
+
 ## The guardrails (from adversarial review)
 
 Three reviewers red-teamed the design against the code. The surviving must-haves,

@@ -122,7 +122,11 @@ def decide_equivalence(a: MathNode, b: MathNode, rules: list[Rule] | None = None
         proof = egg_prove(a, b, rules, bound=bound)
         if proof is not None and recheck_proof(a, proof, rules):
             return Verdict(PROVEN_EQUAL, backend="egg", proof=proof)
-    path = shortest_path(a, b, rules, max_depth=max_depth)
+    # Bidirectional BFS fallback: reconstructs certificates that need an "uphill"
+    # (reverse) step the e-graph linked but its provenance replay couldn't recover.
+    # recheck_proof below independently re-validates it, so this only ever turns a
+    # genuine equivalence into a certificate — never a false positive.
+    path = shortest_path(a, b, rules, max_depth=max_depth, bidirectional=True)
     if path is not None and recheck_proof(a, path, rules):
         return Verdict(PROVEN_EQUAL, backend="bfs", proof=path)
 

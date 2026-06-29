@@ -20,7 +20,7 @@ from .audit import audit_catalogue
 from .catalogue import BY_ID, CATALOGUE, ruleset_from_json
 from .conditions import Assumption
 from .model import (
-    MathNode, distance, from_json, num, pretty, subst_var, succ, to_json, var,
+    MathNode, ac_normalize, distance, from_json, num, pretty, subst_var, succ, to_json, var,
 )
 from .hints import greedy_hints, shortest_path
 from .reference import guided_hint, progress, reference_from_states
@@ -37,6 +37,26 @@ VERSION = "0.1.0"
 
 class RequestError(ValueError):
     """Malformed request -> HTTP 400 / CLI exit 2."""
+
+
+# Rules the equivalence oracle gains when an exercise treats +/· as AC-free. They
+# augment the *oracle only* (final-answer / equation equivalence), never the
+# student's step-validation palette — a derivation must still cite a rule.
+_AC_RULE_IDS = ("add_comm", "add_assoc", "mul_comm", "mul_assoc")
+
+
+def _oracle_rules(rules, ac: bool):
+    """The ruleset for equivalence checking: the exercise's rules, plus the AC
+    rules when ``ac`` is set (deduped, so a listed rule is never doubled)."""
+    if not ac:
+        return rules
+    have = {r.id for r in rules}
+    return list(rules) + [BY_ID[i] for i in _AC_RULE_IDS if i not in have]
+
+
+def _ac_equal(a: MathNode, b: MathNode, ac: bool) -> bool:
+    """Structural equality, up to AC when enabled (the 'reached the target form' test)."""
+    return a == b or (ac and ac_normalize(a) == ac_normalize(b))
 
 
 def _resolve_rules(ex: dict):
@@ -302,6 +322,11 @@ def _invalid(steps_out, idx, reason) -> dict:
 def _grade_core(source, target, rules, by_id, sub, opts, ref, assumptions=frozenset(), hyps=frozenset()) -> dict:
     steps_out = None
     final = None
+    # AC normalisation (instructor opt-in): +/· treated as commutative/associative
+    # for *equivalence* — reaching the target form and the oracle — but never for
+    # step legality (a derivation must still cite each rule it uses).
+    ac = bool(opts.get("ac_normalization"))
+    oracle = _oracle_rules(rules, ac)
 
     # 1) a submitted derivation: each step must be a valid rule application AND
     #    its claimed result must match what the rule actually produces (the
@@ -321,7 +346,9 @@ def _grade_core(source, target, rules, by_id, sub, opts, ref, assumptions=frozen
                 steps_out[i].update(status="invalid",
                                     reason="claimed result does not match the rule output")
                 return _invalid(steps_out, i, "claimed result does not match the rule output")
-        if report.reached_goal:                       # reached the target *form*
+        reached = report.reached_goal or (
+            target is not None and _ac_equal(report.states[-1], target, ac))
+        if reached:                                   # reached the target *form* (up to AC)
             proof = [{"rule": m.rule.id if m.rule else "subst", "path": list(m.path),
                       "direction": "reverse" if m.reverse else "forward", "state": to_json(s)}
                      for m, s in zip(moves, recomputed)]
@@ -333,9 +360,9 @@ def _grade_core(source, target, rules, by_id, sub, opts, ref, assumptions=frozen
     if final is None:
         final = from_json(sub["final"])
     if target is None:                                 # equation mode
-        return _grade_equation(source, final, rules, steps_out)
+        return _grade_equation(source, final, oracle, steps_out, ac)
 
-    resp = _grade_final(source, final, target, rules)
+    resp = _grade_final(source, final, target, oracle, ac)
     resp["steps"] = steps_out
     # Hint toward the goal when the answer is not yet full marks. A reference
     # derivation steers the hint onto the intended route (§B.4); without one we
@@ -349,7 +376,15 @@ def _grade_core(source, target, rules, by_id, sub, opts, ref, assumptions=frozen
         if resp.get("hint") is None:
             resp["hint"] = _hint_toward(final, target, rules)
     if ref is not None:
-        resp.setdefault("meta", {})["progress"] = round(progress(final, ref), 3)
+        p = progress(final, ref)
+        resp.setdefault("meta", {})["progress"] = round(p, 3)
+        # Reference-progress partial credit: when an instructor reference is given,
+        # reward how far the student has travelled *along the intended route*, not
+        # just blind closeness of form. Only ever raises a certified-equivalent
+        # partial score (never invents credit for an unproven or wrong answer, and
+        # never lowers the distance-based score).
+        if resp["outcome"] == PROVEN_EQUAL and resp.get("score") not in (None, 100):
+            resp["score"] = max(resp["score"], max(1, min(99, round(p * 100))))
     return resp
 
 
@@ -373,7 +408,7 @@ def _hint_toward(state, target, rules) -> dict | None:
     return None
 
 
-def _grade_equation(source, final, rules, steps_out) -> dict:
+def _grade_equation(source, final, rules, steps_out, ac=False) -> dict:
     """Equation mode: the submission proves an equation by showing its two sides
     are equivalent (e.g. reducing ``x + 0 = x`` to ``x = x``).
 
@@ -386,7 +421,7 @@ def _grade_equation(source, final, rules, steps_out) -> dict:
         return {**base, "outcome": "invalid_derivation", "score": 0, "certified": False,
                 "feedback": "equation mode expects an equality (eq) expression."}
     lhs, rhs = final.slot("left"), final.slot("right")
-    if lhs == rhs:
+    if _ac_equal(lhs, rhs, ac):
         return {**base, "outcome": PROVEN_EQUAL, "score": 100, "certified": True,
                 "proof": [], "feedback": "Both sides are identical — the equation holds."}
     v = decide_equivalence(lhs, rhs, rules)
@@ -405,7 +440,7 @@ def _grade_equation(source, final, rules, steps_out) -> dict:
             "feedback": "Could not prove or disprove the equation within budget; review."}
 
 
-def _grade_final(source, final, target, rules) -> dict:
+def _grade_final(source, final, target, rules, ac=False) -> dict:
     """Transformation grade for a final expression.
 
     Reaching the target *form* is full marks; a value-equivalent but unsimplified
@@ -414,7 +449,7 @@ def _grade_final(source, final, target, rules) -> dict:
     with a numeric witness.
     """
     base = {"proof": None, "witness": None, "steps": None, "hint": None, "meta": {}}
-    if final == target:
+    if _ac_equal(final, target, ac):
         return {**base, "outcome": PROVEN_EQUAL, "score": 100, "certified": True,
                 "proof": [], "feedback": "Reached the target form."}
     v = decide_equivalence(final, target, rules)

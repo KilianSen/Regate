@@ -316,10 +316,12 @@ def egg_prove(source: MathNode, target: MathNode, rules: list[Rule],
     steps = replay_explanation(eg, source, ea, eb, target)
     if steps is not None:
         return steps
-    # provenance reconstruction can fail on rich graphs; fall back to the
-    # reliable (forward, minimal) search, which the e-graph guarantees exists.
+    # provenance reconstruction can fail on rich graphs; fall back to search. The
+    # e-graph linked the classes, so a chain exists — but it may need a reverse
+    # (bidirectional) step, so search both directions. Every step is re-checked by
+    # robust.recheck_proof before it is trusted as a certificate.
     from .hints import shortest_path
-    return shortest_path(source, target, rules, max_depth=max(bound, 12))
+    return shortest_path(source, target, rules, max_depth=max(bound, 12), bidirectional=True)
 
 
 def _path_valid(term: MathNode, path) -> bool:

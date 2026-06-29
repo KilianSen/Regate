@@ -36,15 +36,50 @@ class Application:
     rule_id: str
     path: Path
     result: MathNode
+    forward: bool = True       # False = a bidirectional rule applied right-to-left
 
 
-def applications(node: MathNode, rules: list[Rule]) -> list[Application]:
-    """Every (rule, path) forward application that changes ``node``, deduped."""
+def _reversible(rules: list[Rule]) -> list[Rule]:
+    """Bidirectional rules safe to also search backward (rhs->lhs) — guard-free and
+    neither side a lone wildcard, so the reverse pattern is bound and terminating.
+    Mirrors ``proof_egraph.directed_rules`` exactly (e.g. excludes ``neg_neg``)."""
+    return [r for r in rules
+            if r.bidir and not r.conditions and r.lhs.op != "wild" and r.rhs.op != "wild"]
+
+
+def applications(node: MathNode, rules: list[Rule], *, bidirectional: bool = False) -> list[Application]:
+    """Every (rule, path) application that changes ``node``, deduped.
+
+    Forward only by default (the directed step engine / hint semantics). With
+    ``bidirectional=True`` it also emits the right-to-left direction of every
+    safely-reversible rule — used only by the proof-certificate search, where each
+    step is independently re-checked by ``robust.recheck_proof``."""
     out: list[Application] = []
-    seen: set[tuple[str, MathNode]] = set()
-    for path in node.paths():
-        sub = node.at(path)
-        for rule in rules:
+    seen: set[tuple[str, bool, MathNode]] = set()
+
+    def emit(rule_id, pattern, template, forward):
+        for path in node.paths():
+            sub = node.at(path)
+            env = match(pattern, sub)
+            if env is None:
+                continue
+            try:
+                new_sub = instantiate(template, env)
+            except KeyError:           # template wildcard unbound -> not a real step
+                continue
+            if new_sub == sub:
+                continue
+            result = node.replace(path, new_sub)
+            key = (rule_id, forward, result)
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(Application(rule_id, path, result, forward))
+
+    for rule in rules:
+        # forward direction must still discharge guards from the literals present
+        for path in node.paths():
+            sub = node.at(path)
             env = match(rule.lhs, sub)
             if env is None or not _constraint_ok(rule, env):
                 continue
@@ -52,11 +87,14 @@ def applications(node: MathNode, rules: list[Rule]) -> list[Application]:
             if new_sub == sub:
                 continue
             result = node.replace(path, new_sub)
-            key = (rule.id, result)
+            key = (rule.id, True, result)
             if key in seen:
                 continue
             seen.add(key)
-            out.append(Application(rule.id, path, result))
+            out.append(Application(rule.id, path, result, True))
+    if bidirectional:
+        for rule in _reversible(rules):
+            emit(rule.id, rule.rhs, rule.lhs, False)
     return out
 
 
@@ -77,14 +115,18 @@ class Step:
     rule_id: str
     path: Path
     state: MathNode
+    forward: bool = True       # False = the rule was used right-to-left (an equality)
 
 
 def shortest_path(source: MathNode, target: MathNode, rules: list[Rule],
-                  max_depth: int = 8) -> list[Step] | None:
-    """Breadth-first shortest directed derivation from ``source`` to ``target``.
+                  max_depth: int = 8, *, bidirectional: bool = False) -> list[Step] | None:
+    """Breadth-first shortest derivation from ``source`` to ``target``.
 
-    Returns the sequence of steps (the full plan), or ``None`` if the goal is not
-    reachable within ``max_depth`` forward applications of ``rules``.
+    Forward only by default. With ``bidirectional=True`` it may also use the
+    reverse direction of a safely-reversible rule (an "uphill" equality move that
+    forward search cannot make) — used by the proof-certificate search, whose every
+    step is re-validated by ``robust.recheck_proof``. Returns the steps, or
+    ``None`` if the goal is not reachable within ``max_depth`` applications.
     """
     if source == target:
         return []
@@ -94,10 +136,10 @@ def shortest_path(source: MathNode, target: MathNode, rules: list[Rule],
         state, trail = frontier.popleft()
         if len(trail) >= max_depth:
             continue
-        for app in applications(state, rules):
+        for app in applications(state, rules, bidirectional=bidirectional):
             if app.result in seen:
                 continue
-            step = Step(app.rule_id, app.path, app.result)
+            step = Step(app.rule_id, app.path, app.result, app.forward)
             new_trail = trail + [step]
             if app.result == target:
                 return new_trail

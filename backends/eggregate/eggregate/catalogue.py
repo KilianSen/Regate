@@ -25,7 +25,7 @@ def wild(name: str) -> MathNode:
     return MathNode("wild", name)
 
 
-a, b, c = wild("a"), wild("b"), wild("c")
+a, b, c, d = wild("a"), wild("b"), wild("c"), wild("d")
 
 
 def nonzero(var: str) -> SideCondition:
@@ -72,10 +72,22 @@ CATALOGUE: list[Rule] = [
     # A genuinely conditional identity: x/x = 1 only when x != 0.  Unconditional,
     # this would let a student "prove" 0/0 = 1.
     Rule("frac_self_one", "frac", frac(a, a), num(1), conditions=(nonzero("a"),)),
+    # Definedness-preserving and guard-free: when a denominator is 0 BOTH sides are
+    # undefined (the audit's `_differs` treats undefined==undefined). Kept
+    # forward-only (the *combining* direction) so reverse "splitting" can't blow up
+    # saturation. a/c + b/c = (a+b)/c ; (a/b)·(c/d) = (a·c)/(b·d).
+    Rule("frac_add_same_denom", "frac", add(frac(a, c), frac(b, c)), frac(add(a, b), c)),
+    Rule("frac_mul",           "frac", mul(frac(a, b), frac(c, d)), frac(mul(a, c), mul(b, d))),
     # -- Negation --------------------------------------------------------
     Rule("neg_neg",     "neg", neg(neg(a)), a, bidir=True),
     Rule("neg_zero",    "neg", neg(num(0)), num(0)),
     Rule("add_inverse", "neg", add(a, neg(a)), num(0)),
+    # Sign algebra — all total (always defined) equalities, safe both ways.
+    Rule("neg_add",       "neg", neg(add(a, b)), add(neg(a), neg(b)), bidir=True),
+    Rule("neg_sub",       "neg", neg(sub(a, b)), sub(b, a), bidir=True),
+    Rule("mul_neg_left",  "mul", mul(neg(a), b), neg(mul(a, b)), bidir=True),
+    Rule("mul_neg_right", "mul", mul(a, neg(b)), neg(mul(a, b)), bidir=True),
+    Rule("frac_neg",      "frac", neg(frac(a, b)), frac(neg(a), b), bidir=True),
     # -- Equality --------------------------------------------------------
     Rule("eq_symm", "eq", eq(a, b), eq(b, a), bidir=True),
 ]
