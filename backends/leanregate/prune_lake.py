@@ -141,14 +141,20 @@ def main() -> None:
             dead += 1
     print(f"prune_lake: removed {dead} dead oleans")
 
-    # Tier 1: .ilean (language-server only) and ProofWidgets JS bundles.
-    # NOTE: we deliberately do NOT delete `.lake/packages/*/.git`. lake verifies
-    # each dependency's checkout against its git remote on every `lake env`; with
-    # .git gone it reports "URL has changed" and re-clones the package — wiping the
-    # prebuilt oleans (and needing network). That would break proving at runtime,
-    # not just here. The .git clones are kept so `lake env lean` stays offline.
-    removed_ilean = 0
-    for root, _dirs, files in os.walk(PACKAGES):
+    # Tier 1: .ilean (language-server only), ProofWidgets JS, and — only when the
+    # runtime will call `lean` directly (the .lean_env is baked, so lake never runs
+    # at runtime) — the package .git clones (~1.2 GB). We must NOT drop .git when
+    # lake is the runtime engine: `lake env` verifies each dependency's checkout
+    # against its git remote and, with .git gone, reports "URL has changed" and
+    # re-clones it — wiping the oleans and needing network. The self-verify below
+    # runs through `lean` direct, so a wrong call here fails the build.
+    drop_git = os.path.isfile(os.path.join(PROJECT, ".lean_env"))
+    removed_ilean = removed_git = 0
+    for root, dirs, files in os.walk(PACKAGES, topdown=True):
+        if drop_git and ".git" in dirs:
+            shutil.rmtree(os.path.join(root, ".git"), ignore_errors=True)
+            dirs.remove(".git")
+            removed_git += 1
         for f in files:
             if f.endswith(".ilean"):
                 try:
@@ -160,8 +166,9 @@ def main() -> None:
     if os.path.isdir(pw_js):
         removed_js = _du(pw_js)
         shutil.rmtree(pw_js, ignore_errors=True)
-    print(f"prune_lake: removed {removed_ilean} .ilean, "
-          f"{removed_js // (1024*1024)} MiB ProofWidgets JS (kept .git for lake)")
+    print(f"prune_lake: removed {removed_git} .git, {removed_ilean} .ilean, "
+          f"{removed_js // (1024*1024)} MiB ProofWidgets JS "
+          f"({'lean-direct' if drop_git else 'kept .git for lake'})")
 
     after = _du(PROJECT)
     print(f"prune_lake: {before // (1024*1024)} MiB -> {after // (1024*1024)} MiB "

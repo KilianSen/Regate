@@ -38,10 +38,15 @@ RUN mkdir -p Regate \
     && printf 'import Mathlib.Tactic.Ring\nimport Mathlib.Tactic.FieldSimp\n' > Regate/Warm.lean \
     && lake env lean Regate/Warm.lean
 
-# Gate the image on the induction translator: emit the proofs and kernel-check them
-# here, where the toolchain already lives. A regressed emitter fails the build, so
-# we never ship an image that generates broken Lean. (MUST_PASS asserts; harder
-# goals are best-effort.)
+# Bake `lake env`'s search paths so the RUNTIME can call `lean` directly and never
+# touch `lake` (lake env re-resolves deps and re-clones packages from GitHub if a
+# checkout looks off, wiping the oleans). lean_prover reads this file; with it the
+# .git clones are no longer needed at runtime, so prune_lake drops them.
+RUN cd /app/leanproj \
+    && { printf 'LEAN_PATH=%s\n' "$(lake env printenv LEAN_PATH)"; \
+         printf 'LD_LIBRARY_PATH=%s\n' "$(lake env printenv LD_LIBRARY_PATH)"; } \
+       > /app/leanproj/.lean_env
+
 ENV LEANREGATE_LEAN_PROJECT=/app/leanproj
 COPY backends/leanregate/lean_prover.py backends/leanregate/lean_induction.py \
      backends/leanregate/check_induction.py backends/leanregate/prune_lake.py ./
@@ -49,7 +54,8 @@ COPY backends/leanregate/lean_prover.py backends/leanregate/lean_induction.py \
 # Slim the cache: `cache get` pulls ALL Mathlib oleans, but the runtime only
 # elaborates the `Mathlib.Tactic` + `Rat.Defs` surface. Delete every olean Lean
 # does not load for that surface (it enumerates them via findOLean), plus
-# .git/.ilean/widget JS. prune_lake self-verifies the auto-prove path afterwards.
+# .git/.ilean/widget JS. prune_lake self-verifies the auto-prove path afterwards
+# (via `lean` direct, using the baked .lean_env).
 RUN python prune_lake.py \
     && rm -rf "$ELAN_HOME"/toolchains/*/share/doc
 

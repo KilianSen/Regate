@@ -198,15 +198,45 @@ def _carried_source(rule: dict) -> str:
 # ---------------------------------------------------------------------------
 # Lean invocation (the mock seam — the only thing that touches the toolchain).
 # ---------------------------------------------------------------------------
+# The Dockerfile bakes `lake env`'s LEAN_PATH/LD_LIBRARY_PATH into this file so the
+# runtime can invoke `lean` directly. We MUST NOT call `lake` at runtime: `lake env`
+# re-resolves dependencies and, if a package's git checkout looks off, deletes and
+# re-clones it from GitHub — wiping the prebuilt oleans and needing network. Calling
+# `lean` with the captured env sidesteps lake entirely (and is far faster: no
+# workspace resolution). Absent the file (dev/source checkout) we fall back to lake.
+LEAN_ENV_FILE = os.path.join(LEAN_PROJECT, ".lean_env")
+
+
+def _baked_env() -> dict[str, str] | None:
+    if not os.path.isfile(LEAN_ENV_FILE):
+        return None
+    env: dict[str, str] = {}
+    with open(LEAN_ENV_FILE, encoding="utf-8") as fh:
+        for line in fh:
+            line = line.rstrip("\n")
+            if "=" in line:
+                k, v = line.split("=", 1)
+                if v:
+                    env[k] = v
+    return env or None
+
+
+def _lean_direct_ok() -> bool:
+    return _baked_env() is not None and shutil.which("lean") is not None
+
+
 def lean_available() -> bool:
-    return shutil.which("lake") is not None and os.path.isdir(LEAN_PROJECT)
+    if not os.path.isdir(LEAN_PROJECT):
+        return False
+    return _lean_direct_ok() or shutil.which("lake") is not None
 
 
 def _run_lean(body: str) -> tuple[bool, str]:
     """Elaborate `body` in the prebuilt Mathlib project. (True, "") on success;
     (False, diagnostics) on a Lean error, missing toolchain, or timeout.
 
-    Isolated so tests can stub it without a Lean install."""
+    Prefers a direct `lean` call with the baked env (no lake); falls back to
+    `lake env lean`. Isolated so tests can stub it without a Lean install."""
     if not lean_available():
         return False, "lean toolchain unavailable"
     src_dir = os.path.join(LEAN_PROJECT, "Regate")
@@ -214,10 +244,16 @@ def _run_lean(body: str) -> tuple[bool, str]:
     src = os.path.join(src_dir, "Check.lean")
     with open(src, "w", encoding="utf-8") as fh:
         fh.write(body)
+    rel = os.path.relpath(src, LEAN_PROJECT)
+    baked = _baked_env()
+    if baked is not None and shutil.which("lean") is not None:
+        cmd, env = ["lean", rel], {**os.environ, **baked}
+    else:
+        cmd, env = ["lake", "env", "lean", rel], None
     try:
         proc = subprocess.run(
-            ["lake", "env", "lean", os.path.relpath(src, LEAN_PROJECT)],
-            cwd=LEAN_PROJECT, capture_output=True, text=True, timeout=LEAN_TIMEOUT,
+            cmd, cwd=LEAN_PROJECT, capture_output=True, text=True,
+            timeout=LEAN_TIMEOUT, env=env,
         )
     except subprocess.TimeoutExpired:
         return False, f"lean timed out after {LEAN_TIMEOUT}s"
