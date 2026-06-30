@@ -14,7 +14,7 @@ test:                 ## eggregate test suite
 gate:                 ## rule-library soundness gate (non-zero on an unsound rule)
 	cd backends/eggregate && $(abspath $(PY)) check_rules.py
 
-conformance:          ## run every fixture through BOTH backends' CLIs
+conformance:          ## run every fixture through its target backends' CLIs
 	$(PY) conformance/run_conformance.py
 
 lean:                 ## fetch Mathlib oleans for the runtime prover (no rule library to build)
@@ -34,7 +34,7 @@ docker:               ## build all backend images (context = repo root)
 	docker build -f backends/coqregate/Dockerfile -t coqregate .
 	docker build -f backends/cvc5regate/Dockerfile -t cvc5regate .
 
-up:                   ## run both backends via docker compose
+up:                   ## run all backends via docker compose
 	docker compose up --build
 
 ci: test gate conformance   ## what CI runs

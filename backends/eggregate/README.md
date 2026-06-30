@@ -20,7 +20,7 @@ over a shared rule catalogue. The two core MS3 capabilities:
 
 Built on top of those:
 
-- **Two proving backends** — a minimal-but-incomplete BFS search and a
+- **Two provers** — a minimal-but-incomplete BFS search and a
   complete-but-non-minimal proof-producing e-graph — with a comparison harness.
 - **A soundness & fairness layer** — sound numeric disproof, a three-valued
   grading decision, a trusted proof re-checker, and a rule-library audit gate.
@@ -36,7 +36,7 @@ doesn't.
 
 ```sh
 .venv/bin/python demo.py            # reproduces Appendix B (Tables 6/7/8)
-.venv/bin/python demo_backends.py   # bfs vs egg proving backends, side by side
+.venv/bin/python demo_backends.py   # bfs vs egg provers, side by side
 .venv/bin/python test_eggregate.py  # tests pinning the thesis numbers + soundness
 .venv/bin/python check_rules.py     # CI gate: fails if any rewrite rule is unsound
 ```
@@ -45,10 +45,9 @@ Wire `check_rules.py` into CI so the rule library can't regress — a new or
 edited rule that isn't a sound, definedness-preserving equality fails the build
 with a concrete counterexample.
 
-The dev `.venv` is free-threaded CPython 3.15t with a locally-built egglog wheel
-(see `BUILD-egglog-3.15t.md`) — but **the deployable image uses stable CPython
-3.13 + the official egglog wheel**; the patched 3.15t build was for experiments
-only.
+The dev `.venv` may be free-threaded CPython 3.15t with a locally-built egglog
+wheel — but **the deployable image uses stable CPython 3.13 + the official egglog
+wheel**; the patched 3.15t build was for experiments only.
 
 ## Deploy as a grading backend (OCI)
 
@@ -88,9 +87,9 @@ before it can grade anything.
 | `eggregate/catalogue.py` | the rewrite-rule catalogue as **one shared data source** | Table 4, §4.3 |
 | `eggregate/validate.py` | **step-local validator**: Type-A rule application, Type-B Leibniz substitution, whole-proof replay | §5, doc §3/§5 |
 | `eggregate/backend.py` | egglog `Math` datatype, catalogue→ruleset compiler, **bounded** equality saturation, `equivalent` / `grade` (pass-sound oracle) | §4.5, §5.7, §6.3 |
-| `eggregate/hints.py` | directed step engine, greedy one-ply `greedy_hints`, and `shortest_path` / `all_shortest_paths` (paths + `N_min`) — **proving backend #1 (bfs)** | §5.6, §B.4 |
-| `eggregate/proof_egraph.py` | a **proof-producing e-graph** (congruence closure + provenance + `explain`) — **proving backend #2 (egg)** | §4.5; FMCAD 2022 |
-| `eggregate/compare.py` | run both backends on one goal and contrast (existence, length, time) | — |
+| `eggregate/hints.py` | directed step engine, greedy one-ply `greedy_hints`, and `shortest_path` / `all_shortest_paths` (paths + `N_min`) — **prover #1 (bfs)** | §5.6, §B.4 |
+| `eggregate/proof_egraph.py` | a **proof-producing e-graph** (congruence closure + provenance + `explain`) — **prover #2 (egg)** | §4.5; FMCAD 2022 |
+| `eggregate/compare.py` | run both provers on one goal and contrast (existence, length, time) | — |
 | `eggregate/semantics.py` | exact rational evaluation + **counterexample search** (sound disproof) | §5 soundness |
 | `eggregate/audit.py` | **rule-library soundness fuzzer** (catches unsound rules / missing guards) | §5, doc "verify the rules" |
 | `eggregate/robust.py` | three-valued `decide_equivalence`, `grade_robust`, and `recheck_proof` (trusted kernel) | §4.4 |
@@ -98,7 +97,7 @@ before it can grade anything.
 | `eggregate/precompute.py` | **per-exercise e-graph precomputation** — saturate once, grade many | §6.1 |
 | `eggregate/service.py` | grading-protocol handler (maps the contract onto the internals) | §5.5 |
 | `eggregate/server.py` | CLI + HTTP transports for the protocol | §5.5 |
-| `demo.py` / `demo_backends.py` | Appendix B; and the two backends side by side | Appendix B |
+| `demo.py` / `demo_backends.py` | Appendix B; and the two provers side by side | Appendix B |
 
 The catalogue is consumed by **two engines without duplication** — the egglog
 ruleset is *compiled* from it, and the directed stepper/validator *interpret* it
@@ -118,7 +117,7 @@ The earlier transcript overstated egglog's role. The corrected split:
   trust a successful `check`; a failure means "not proven within the bound," not
   "unequal." It is the right tool for *manual edits* and *macro-steps*, not for
   re-confirming steps the engine just produced.
-- **Two proving backends, both producing proofs (paths), neither relying on
+- **Two provers, both producing proofs (paths), neither relying on
   egglog's broken proof mode.**
   - `bfs` (`hints.shortest_path`): forward search → **minimal** chain, but only
     over the forward-directed fragment (no symmetric/uphill moves).
@@ -131,7 +130,7 @@ The earlier transcript overstated egglog's role. The corrected split:
 
   `compare.py` runs both and reports where they agree/diverge — e.g. `x == x+0`
   is provable by `egg` but not by forward `bfs`. We built our own e-graph because
-  egglog's proof extraction is non-functional (see `NOTES-egglog-proofs.md`).
+  egglog's proof extraction is non-functional (see `docs/NOTES-egglog-proofs.md`).
 - **Guarded rules are where soundness actually lives.** The oracle only compiles
   literal-decidable guards (so it never blesses `x/x = 1` for symbolic `x`);
   symbolic guards are discharged by the validator against student assumptions.
@@ -216,7 +215,7 @@ with a 128-step proof proves in <0.3 s), the **hostile** regime explodes (three
 nested distributable products → 20 k e-nodes). Equality is near-`O(1)`; proof
 search is exponential in depth; saturation is exponential in the iteration bound
 for AC theories; rule count is *linear* per step. Full analysis, complexity
-table, and reproducible numbers in **[`SCALING.md`](../../docs/SCALING.md)** (run
+table, and reproducible numbers in **[`SCALING.md`](docs/SCALING.md)** (run
 `.venv/bin/python bench.py`).
 
 ## Limitations
@@ -226,7 +225,7 @@ library); proving is *incomplete both ways* (bounded/forward-only); the egg
 backend is *our reimplementation, lightly tested*; scope is *school algebra
 only*; and it is *not integrated with Artemis*. Full, tagged breakdown
 (deliberate scope vs. immaturity vs. method limits) in
-**[`LIMITATIONS.md`](../../docs/LIMITATIONS.md)**.
+**[`LIMITATIONS.md`](docs/LIMITATIONS.md)**.
 
 ## Design notes / known edges
 

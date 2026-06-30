@@ -1,27 +1,3 @@
-"""Build-time image slimmer for the Lean stage (NOT shipped to runtime).
-
-`lake exe cache get` downloads the oleans for *all* of Mathlib (~5 GB), but the
-container only ever elaborates the runtime-generated files in `lean_prover` /
-`lean_induction`, whose import surface is `Mathlib.Tactic` + `Mathlib.Data.Rat.Defs`
-(see `_carried_source`). Lean loads exactly the transitive closure of those
-imports and nothing else, so every olean outside that closure is dead weight.
-
-This script:
-
-  1. asks Lean *itself* for the authoritative set of olean FILES the runtime
-     import surface loads — via `findOLean`, so it is independent of the on-disk
-     build layout (`.lake/build/lib/` vs `.lake/build/lib/lean/`, which differs
-     across Lean versions). No path→module reconstruction, no guessing.
-  2. deletes every package olean Lean did not load (Tier 2);
-  3. drops `.git` clones, `.ilean` server indices, ProofWidgets' JS bundles (Tier 1);
-  4. SELF-VERIFIES: re-proves a known-sound rule through `lean_prover` after the
-     deletion. If the prune removed something the prover needs, this fails and the
-     Docker build fails — a broken image is never shipped.
-
-It also ABORTS before deleting if the closure looks implausibly small, so a Lean
-error can never nuke the build cache. stdlib-only (besides importing lean_prover,
-which the Dockerfile has already copied alongside this script).
-"""
 from __future__ import annotations
 
 import os

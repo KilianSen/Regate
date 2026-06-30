@@ -1,35 +1,3 @@
-"""Runtime Lean prover for Leanregate custom rulesets.
-
-The scaffold rejected inline `exercise.ruleset`s outright: a formal backend may
-only grade with rules it has a proof for, and the scaffold had no way to prove a
-rule that arrived on the wire. This module lifts that restriction for *trusted*
-authors (instructors, not students) by **establishing soundness at request time**
-with a real Lean kernel running in the container.
-
-Per rule, hybrid:
-
-  1. *auto-prove* — translate the MathNode `lhs`/`rhs` (+ `conditions` as
-     hypotheses) into a rational-identity goal over ℚ and discharge it with
-     `field_simp [hyps]; ring`. The whole catalogue lives in this fragment, so a
-     sound rule proves itself and an unsound one (a missing `≠ 0` guard, say) is
-     *rejected* — Lean cannot prove a false identity.
-  2. *proof-carrying* — if auto-prove fails and the rule ships a `proof` tactic
-     block, elaborate and kernel-check that instead (covers rules outside the
-     ring/field fragment, e.g. relational rewrites).
-
-A rule Lean accepts becomes a `ProvenRule` for this request (see
-`lean_check.proven_from_custom`); one it rejects, or one that needs a tactic
-outside the fragment with no supplied proof, is left UNPROVEN — derivations using
-it grade `unknown`, never a false grade. That asymmetry is the same honesty the
-scaffold had, now extended to dynamically-supplied rules.
-
-Lean runs in-process via `lake env lean` on a generated file inside a prebuilt
-Mathlib project (`LEANREGATE_LEAN_PROJECT`). If the toolchain is absent the
-prover reports `unavailable` and `grade.py` grades `unknown` (no rules can be
-proven; Leanregate has no built-in catalogue to fall back to).
-
-stdlib-only; shares no code with Eggregate — only the protocol.
-"""
 from __future__ import annotations
 
 import hashlib

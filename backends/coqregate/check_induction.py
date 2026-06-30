@@ -1,16 +1,4 @@
 #!/usr/bin/env python3
-"""Live Coq check: prove the *emitted* induction proofs actually kernel-check.
-
-`coq_induction.build_source` generates a Coq `induction n` proof for a goal; this
-feeds a curated set through a real Rocq/Coq toolchain (`coq_prover.check_source`)
-and asserts the MUST_PASS ones compile. It closes the gap unit tests can't: that
-the translation produces genuinely kernel-checkable Coq, not just plausible text.
-
-    python check_induction.py               # skips cleanly if Coq is absent
-    python check_induction.py --require-coq # CI: fail if Coq is unavailable
-
-Needs `coqc` (or `rocq`) on PATH; nothing else (standard library only).
-"""
 from __future__ import annotations
 
 import argparse

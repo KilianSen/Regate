@@ -1,38 +1,3 @@
-"""Certify a proof by induction over ℕ with a real Rocq/Coq kernel run.
-
-Eggregate grades the two obligations (base, step) soundly but can only *assert*
-the induction schema (`base ∧ step ⟹ ∀n.P(n)`). This module is where coqregate
-earns its keep: it translates the induction goal + its recursive definitions into
-Coq, emits an `induction n` proof, and **kernel-checks it** — turning eggregate's
-deferred `equal_no_certificate` into a certified verdict. It is the direct
-analogue of Leanregate's `lean_induction`, but lighter: Coq's `ring`/`field`/`lia`
-ship in the standard library, so there is no Mathlib-scale dependency.
-
-Honest by construction (same as `coq_prover`): if Coq accepts the proof the claim
-is certified; if Coq rejects it, the goal is outside the supported fragment, or
-the toolchain is absent, we report not-certified and `grade.py` returns
-`unknown` — never a false grade.
-
-Supported fragment (a first slice, identical to lean_induction): a ℚ-valued
-equality over `+ - *`/`pow`/`succ`/literals, with the induction variable (and any
-other exponents) typed ℕ and all other variables ℚ, and `pow` defined by the two
-transmitted rules `pow(a,0) → base` and `pow(a,S n) → step`. Anything else ⇒ not
-certified (`unknown`).
-
-## Qeq (`==`) vs Leibniz (`=`) — the key translation decision
-
-Coq's rationals are `QArith`'s `Q` (a pair numerator # denominator). Two `Q`
-values that denote the same rational — e.g. `2#4` and `1#2` — are *propositionally
-distinct* under Leibniz equality `=`, but equal under `Qeq`, written `==`. The
-`Q` ring/field instances (and hence `ring`/`field`) are therefore declared over
-the **setoid equality `Qeq`**, not `=`. We deliberately state and prove the goal
-as `lhs == rhs` (Qeq): this is the mathematically correct notion of rational
-equality, and it is the only one `ring`/`field` can discharge. (Proving Leibniz
-`=` would fail on `ring` and force brittle `Qreduction` normalisation for no
-semantic gain.) The MathNode `eq` node thus maps to `==`.
-
-stdlib-only; shares no code with Eggregate or Leanregate — only the protocol.
-"""
 from __future__ import annotations
 
 import copy

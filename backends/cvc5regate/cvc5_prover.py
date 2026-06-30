@@ -1,38 +1,3 @@
-"""Runtime cvc5 solver seam for cvc5regate.
-
-This is the analogue of leanregate's `lean_prover`: the single place that touches
-the external prover. Where leanregate shells out to the Lean kernel on a generated
-`.lean` file, cvc5regate shells out to the **cvc5 SMT solver** on a generated
-`.smt2` file. Everything around it (MathNode→SMT translation, the certify/grade
-wiring, caching) is solver-agnostic and lives in the sibling modules.
-
-Two solver calls, mirroring eggregate's disprove-first / prove-second philosophy
-(`robust.py`):
-
-  * **prove** — feed the *negated, universally-quantified* goal with cvc5's
-    structural-induction engine enabled (`--quant-ind`). `unsat` means the
-    negation is unsatisfiable, i.e. `∀n. P(n)` is a theorem.
-  * **disprove** — feed the goal with the induction variable a *free* constant
-    and cvc5's recursive-function model finder enabled (`--fmf-fun`). `sat` plus a
-    concrete model is a counterexample — a numeric witness, exactly what the
-    protocol's `proven_unequal` requires.
-
-Optionally, when proving, cvc5 can emit an **Alethe** proof
-(`--produce-proofs --proof-format-mode=alethe`) which the **Carcara** checker can
-independently re-verify — an independent re-check on top of the solver's own word,
-the strongest form of `certified`. (cvc5 1.3.x cannot yet export Alethe for proofs
-that contain induction skolems, so for inductive goals this path is currently a
-no-op and we fall back to the solver verdict; the plumbing activates automatically
-for any goal whose proof *is* Alethe-exportable, and for future cvc5 releases.)
-
-Honest by construction: a `sat`/`unsat` verdict is acted on; `unknown`, a timeout,
-or an absent toolchain is reported as such so the caller returns `unknown` — never
-a false grade.
-
-stdlib-only Python; the cvc5 (and optional Carcara) binaries are external
-processes, like Lean. Shares no code with eggregate or leanregate — only the
-protocol.
-"""
 from __future__ import annotations
 
 import hashlib

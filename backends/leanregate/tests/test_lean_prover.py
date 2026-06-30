@@ -1,11 +1,3 @@
-"""Runtime-prover tests for Leanregate. The Lean toolchain is not present in the
-test/scaffold env, so these stub the single subprocess seam (`_run_lean`) and the
-`lean_available` probe: everything *around* Lean — MathNode→Lean translation,
-the hybrid auto/proof-carrying decision, caching, and the grade.py wiring — is
-exercised here. The Lean invocation itself is verified in CI / the container.
-
-Runnable standalone:  python tests/test_lean_prover.py
-"""
 from __future__ import annotations
 
 import os

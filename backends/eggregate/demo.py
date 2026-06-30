@@ -1,13 +1,3 @@
-"""Worked example from Appendix B, run through the MS3 e-graph backend.
-
-Exercise (Table 5): simplify  3*(x+0) / (3*1)  to  x,  using only
-    add_zero_right, frac_mul_cancel_left, frac_one_denom, mul_one_right.
-
-This script demonstrates the two things MS3 promises over the rewrite-chain
-grader and the greedy hinter:
-  1. equivalence-based grading is path-independent (Section 4.4 / B.3);
-  2. hints can rank a whole path to the goal, not one greedy move (Section B.4).
-"""
 from __future__ import annotations
 
 from eggregate import (

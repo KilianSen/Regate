@@ -1,17 +1,4 @@
 #!/usr/bin/env python3
-"""Live Lean check: prove the *emitted* induction proofs actually kernel-check.
-
-`lean_induction.build_source` generates a Lean `induction n` proof for a goal;
-this feeds a curated set through a real Lean toolchain (`lean_prover._run_lean`)
-and asserts the MUST_PASS ones compile. It closes the gap that unit tests can't:
-that the translation produces genuinely kernel-checkable Lean, not just
-plausible-looking text.
-
-    python check_induction.py                # skips cleanly if Lean is absent
-    python check_induction.py --require-lean # CI: fail if Lean is unavailable
-
-Point it at a built lake project (with Mathlib) via LEANREGATE_LEAN_PROJECT.
-"""
 from __future__ import annotations
 
 import argparse

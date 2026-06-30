@@ -1,11 +1,3 @@
-"""Two proving backends, side by side.
-
-  bfs  -- minimal-chain search over forward rule applications (hints.shortest_path)
-  egg  -- saturate a proof-producing e-graph, read the proof off provenance
-          (proof_egraph.egg_prove), the way egg's explain_equivalence works.
-
-Run:  .venv/bin/python demo_backends.py
-"""
 from __future__ import annotations
 
 from eggregate import add, compare, frac, mul, neg, num, print_comparison, rules, sub, var

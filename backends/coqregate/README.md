@@ -39,7 +39,7 @@ denote the same rational — `2#4` and `1#2` — are *Leibniz-distinct* but equa
 under `Qeq`, written `==`; the `Q` ring/field instances (and `ring`/`field`) are
 declared over **`Qeq`**, not `=`. Coqregate therefore states and proves the goal
 as `lhs == rhs` — the mathematically correct notion of rational equality and the
-only one `ring`/`field` can discharge. (See the header of `coq_induction.py`.)
+only one `ring`/`field` can discharge.
 
 ## Trust model
 

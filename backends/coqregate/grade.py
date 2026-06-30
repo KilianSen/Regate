@@ -1,22 +1,3 @@
-"""Coqregate grading entrypoint — conforms to the shared grading protocol.
-
-    python grade.py            # HTTP: POST /grade, GET /health  (port 8000)
-    python grade.py --cli      # CLI:  GradeRequest stdin -> GradeResponse stdout
-
-Self-contained (stdlib only); shares no code with Eggregate or Leanregate — it
-shares only the *protocol* (GRADING_PROTOCOL.md), which is the point.
-
-Coqregate is a **specialist certifier**: its job is to certify proofs by
-**induction over ℕ** (`mode: "induction"`) with a real Rocq/Coq kernel run — the
-same role Leanregate fills with Lean, but lighter (Coq's `ring`/`field`/`lia`
-ship in the standard library, no Mathlib-scale dependency). On `mode: "induction"`
-it emits an `induction n` proof and kernel-checks it: Coq accepts → `proven_equal`
-/ `certified: true`; Coq rejects, the goal is outside the supported fragment, or
-the toolchain is absent → `unknown` (honestly inconclusive, never a false grade).
-
-Non-induction modes (equational transformation / equation) are out of scope here —
-that is Eggregate's and Leanregate's job — so they return `unknown`, not a guess.
-"""
 from __future__ import annotations
 
 import json

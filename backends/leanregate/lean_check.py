@@ -1,23 +1,3 @@
-"""A formal step-checker for Leanregate.
-
-Leanregate's claim is *formal* soundness: a derivation is graded by checking each
-step is an **instance of a rule the Lean kernel proved for this request**. This
-module is that check. It is stdlib-only (shares no code with Eggregate — only the
-protocol) and operates directly on the MathNode JSON shape.
-
-There is no built-in rule library and no `Basic.lean`: rules come from the API.
-Each rule is transmitted in `exercise.ruleset`, proven at request time by
-`lean_prover`, and passed in as a `ProvenRule` table (`grade._prove_ruleset`). A
-step that instantiates one of those proven rules at its path is certified; a step
-that needs a side condition Lean would demand (a guarded rule) or uses a rule with
-no proof is **not** certified — the grader returns `unknown` rather than a false
-grade. That asymmetry is the whole point: Leanregate certifies only what Lean has
-just proven.
-
-Path encoding matches the protocol / Eggregate `model.py`: a path integer indexes
-the flat child list obtained by visiting slots in *alphabetical* order (so a
-fraction is [denominator, numerator]).
-"""
 from __future__ import annotations
 
 import copy

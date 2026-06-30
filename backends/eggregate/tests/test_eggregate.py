@@ -1,7 +1,3 @@
-"""Tests that pin Eggregate to the thesis's Appendix B numbers.
-
-Run:  .venv/bin/python -m pytest test_eggregate.py   (or just run this file)
-"""
 from __future__ import annotations
 
 import os

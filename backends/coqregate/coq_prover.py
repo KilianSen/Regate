@@ -1,21 +1,3 @@
-"""Runtime Rocq/Coq kernel seam for Coqregate.
-
-This is the single place that touches the proof toolchain: it writes a generated
-`.v` source to a temp file, runs the Coq compiler over it, and reports
-success/diagnostics. `coq_induction` builds on top of it to certify proofs by
-induction over ℕ.
-
-Honest by construction: if Coq accepts the source the claim is certified; if Coq
-rejects it, or the toolchain is absent, we report failure and the caller returns
-`unknown` — never a false grade. Same caching style as Leanregate's
-`lean_prover` (content-addressed by source hash).
-
-Toolchain: prefers `coqc <file.v>`; falls back to `rocq compile <file.v>` (Rocq
-9.x renamed the binary). The standard library ships `ring`/`field`/`lia`/`nia`,
-so there is no Mathlib-scale dependency — that is Coqregate's whole point.
-
-stdlib-only; shares no code with Eggregate or Leanregate — only the protocol.
-"""
 from __future__ import annotations
 
 import hashlib

@@ -1,21 +1,3 @@
-"""Leanregate grading entrypoint — conforms to the shared grading protocol.
-
-    python grade.py            # HTTP: POST /grade, GET /health  (port 8000)
-    python grade.py --cli      # CLI:  GradeRequest stdin -> GradeResponse stdout
-
-Self-contained (stdlib only); shares no code with Eggregate — it shares only the
-*protocol* (GRADING_PROTOCOL.md), which is the point.
-
-Grading is *formal*, and rules come from the API: there is no built-in rule
-library and no `Basic.lean`. Each rule is transmitted in `exercise.ruleset` and
-**proven at request time by a Lean kernel** (`lean_prover`); `lean_check` then
-certifies each derivation step is an instance of a just-proven rule. A derivation
-whose every step is certified and whose endpoint reaches the target (or, in
-equation mode, a reflexive `a = a`) is `proven_equal` with `certified=true`.
-Anything Lean has not proven — a guarded rule's side condition, a rule the kernel
-could not prove, value-equivalence without a derivation — returns `unknown`:
-honestly inconclusive, never a false grade.
-"""
 from __future__ import annotations
 
 import json

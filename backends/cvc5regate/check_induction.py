@@ -1,22 +1,4 @@
 #!/usr/bin/env python3
-"""Live cvc5 check: prove the *emitted* induction goals actually settle in cvc5.
-
-`cvc5_induction.build_*_source` generates SMT-LIB for an induction goal; this feeds
-a curated set through a real cvc5 binary (`cvc5_prover`) and asserts the MUST_PASS
-ones get the expected verdict. It closes the gap unit tests can't: that the
-translation produces genuinely solvable SMT, not just plausible-looking text.
-
-    python check_induction.py                # skips cleanly if cvc5 is absent
-    python check_induction.py --require-cvc5 # CI: fail if cvc5 is unavailable
-
-Point it at a cvc5 binary via CVC5REGATE_CVC5 (or have `cvc5` on PATH).
-
-The MUST_PASS set deliberately includes goals **outside leanregate's Lean emitter
-fragment** — a divisibility goal (`3 ∣ n³−n`), an inequality (`2ⁿ ≥ 1`), and a
-recursive-sum equality (`2·Σi = n(n+1)`) — to demonstrate the coverage cvc5 adds,
-plus the equality `1ⁿ = 1` that leanregate also proves, and a disproof
-(`2ⁿ = n+1` is false) yielding a concrete numeric witness.
-"""
 from __future__ import annotations
 
 import argparse

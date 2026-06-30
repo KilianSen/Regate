@@ -1,23 +1,3 @@
-"""Certify a proof by induction over ℕ with a real Lean kernel run.
-
-eggregate grades the two obligations (base, step) soundly but can only *assert*
-the induction schema (`base ∧ step ⟹ ∀n.P(n)`). This module is where leanregate
-earns its keep: it translates the induction goal + its recursive definitions into
-Lean, emits an `induction n` proof, and **kernel-checks it** — turning eggregate's
-deferred `equal_no_certificate` into a certified verdict.
-
-Honest by construction (same as `lean_prover`): if Lean accepts the proof the
-claim is certified; if Lean rejects it, or the goal is outside the supported
-fragment, or the toolchain is absent, we report not-certified and `grade.py`
-returns `unknown` — never a false grade.
-
-Supported fragment (a first slice): a goal that is a ℚ-valued equality over `+ - *`
-/`pow`/`succ`/literals, with the induction variable (and any other exponents)
-typed ℕ and all other variables ℚ, and `pow` defined by the two transmitted rules
-`pow(a,0) → base` and `pow(a,S n) → step`. Anything else ⇒ not certified (`unknown`).
-
-stdlib-only; shares no code with Eggregate — only the protocol.
-"""
 from __future__ import annotations
 
 import hashlib

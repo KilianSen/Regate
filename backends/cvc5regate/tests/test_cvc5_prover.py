@@ -1,12 +1,3 @@
-"""Tests for cvc5regate. cvc5 may or may not be present; the bulk of these stub
-the single subprocess seam (`cvc5_prover._run_cvc5`) and the `cvc5_available`
-probe so everything *around* cvc5 — MathNode→SMT translation, type inference, the
-certify/disprove-first decision, caching, and the grade.py wiring — runs without a
-solver. A final block of tests is gated on a real cvc5 being available and
-exercises it end-to-end.
-
-Runnable standalone:  python tests/test_cvc5_prover.py
-"""
 from __future__ import annotations
 
 import os

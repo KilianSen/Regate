@@ -1,12 +1,3 @@
-"""Reproducible scaling benchmarks for Eggregate.  Run: .venv/bin/python bench.py
-
-Three families, each isolating one axis:
-  A. depth/size on a benign (shrink-only) term      -> the easy regime
-  B. raw saturation growth under AC + distributivity -> the explosion ceiling
-  C. cost vs rule count                              -> the linear axis
-
-Numbers from this script are the source for SCALING.md.
-"""
 from __future__ import annotations
 
 import time

@@ -1,27 +1,3 @@
-"""cvc5regate grading entrypoint — conforms to the shared grading protocol.
-
-    python grade.py            # HTTP: POST /grade, GET /health  (port 8000)
-    python grade.py --cli      # CLI:  GradeRequest stdin -> GradeResponse stdout
-
-Self-contained (stdlib only — the cvc5 binary is an external process); shares no
-code with eggregate or leanregate — only the *protocol* (GRADING_PROTOCOL.md).
-
-cvc5regate is an **induction certifier**: the third sibling backend. It fills the
-same role leanregate fills with Lean — certifying the `base ∧ step ⟹ ∀n.P(n)`
-schema that an equational backend (eggregate) can only *assume* — but with the
-cvc5 SMT solver instead of Lean + Mathlib. That makes it far lighter (a ~20 MB
-solver binary vs ~9 GB of Lean+Mathlib) and broader: cvc5 has native structural
-induction and certifies goals **outside leanregate's equality-only emitter** —
-inequalities (`2ⁿ ≥ 1`), divisibility (`3 ∣ n³−n`), and goals over recursive
-functions beyond a single `pow` (e.g. a sum). It also *disproves* a false claim
-with a concrete numeric witness.
-
-Honest by construction: cvc5 `unsat` ⇒ certified `proven_equal`; `sat` with a
-model ⇒ `proven_unequal` carrying the witness; `unknown` / timeout / a goal
-outside the supported fragment / an absent toolchain ⇒ `unknown` — never a false
-grade. (Non-induction equational grading is eggregate's / leanregate's job; for
-those modes cvc5regate is honestly inconclusive.)
-"""
 from __future__ import annotations
 
 import json

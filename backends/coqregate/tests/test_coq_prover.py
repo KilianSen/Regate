@@ -1,12 +1,3 @@
-"""Tests for Coqregate. The Coq toolchain may not be present in the test env, so
-the translation/emitter tests stub the single subprocess seam (`check_source`)
-and the `coq_available` probe: everything *around* Coq — MathNode→Coq
-translation, the ℚ/ℕ type inference, the emitted proof structure, caching, and
-the grade.py wiring — is exercised here without a Coq install. The Coq invocation
-itself is verified by `check_induction.py --require-coq` (CI / a local toolchain).
-
-Runnable standalone:  python tests/test_coq_prover.py
-"""
 from __future__ import annotations
 
 import os
