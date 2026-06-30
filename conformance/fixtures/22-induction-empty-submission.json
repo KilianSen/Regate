@@ -1,0 +1,140 @@
+{
+  "name": "22-induction-empty-submission",
+  "note": "Regression: an induction exercise with an EMPTY submission must NOT be certified. Leanregate grades the student's base+step derivations (lean_check.check_induction); a missing proof is invalid_derivation/0, never proven_equal. This holds with or without the Lean toolchain (the submission check is symbolic and runs before the Lean backstop), so the Lean-free conformance harness exercises it.",
+  "request": {
+    "protocol": "1.0",
+    "exercise": {
+      "mode": "induction",
+      "goal": {
+        "type": "eq",
+        "slots": {
+          "left": [
+            {
+              "type": "pow",
+              "slots": {
+                "base": [
+                  {
+                    "type": "number",
+                    "value": "1"
+                  }
+                ],
+                "exponent": [
+                  {
+                    "type": "variable",
+                    "value": "n"
+                  }
+                ]
+              }
+            }
+          ],
+          "right": [
+            {
+              "type": "number",
+              "value": "1"
+            }
+          ]
+        }
+      },
+      "inductionVar": "n",
+      "rules": [
+        "mul_one_left"
+      ],
+      "definitions": [
+        {
+          "id": "pow_zero",
+          "owner": "pow",
+          "lhs": {
+            "type": "pow",
+            "slots": {
+              "base": [
+                {
+                  "type": "wild",
+                  "value": "a"
+                }
+              ],
+              "exponent": [
+                {
+                  "type": "number",
+                  "value": "0"
+                }
+              ]
+            }
+          },
+          "rhs": {
+            "type": "number",
+            "value": "1"
+          },
+          "bidirectional": false,
+          "conditions": []
+        },
+        {
+          "id": "pow_succ",
+          "owner": "pow",
+          "lhs": {
+            "type": "pow",
+            "slots": {
+              "base": [
+                {
+                  "type": "wild",
+                  "value": "a"
+                }
+              ],
+              "exponent": [
+                {
+                  "type": "succ",
+                  "slots": {
+                    "inner": [
+                      {
+                        "type": "wild",
+                        "value": "n"
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          },
+          "rhs": {
+            "type": "mul",
+            "slots": {
+              "left": [
+                {
+                  "type": "wild",
+                  "value": "a"
+                }
+              ],
+              "right": [
+                {
+                  "type": "pow",
+                  "slots": {
+                    "base": [
+                      {
+                        "type": "wild",
+                        "value": "a"
+                      }
+                    ],
+                    "exponent": [
+                      {
+                        "type": "wild",
+                        "value": "n"
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          },
+          "bidirectional": false,
+          "conditions": []
+        }
+      ]
+    },
+    "submission": {}
+  },
+  "expect": {
+    "leanregate": {
+      "outcome": "invalid_derivation",
+      "score": 0
+    }
+  }
+}

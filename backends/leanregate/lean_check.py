@@ -263,3 +263,150 @@ def check_derivation(source: dict, steps: list[dict],
         steps_out.append({"index": i, "status": "valid", "reason": f"Lean: {res.lean}"})
         state = res.result
     return DerivationReport("certified", state, steps_out)
+
+
+# ---------------------------------------------------------------------------
+# Induction: certify the STUDENT's base + inductive-step derivations.
+# ---------------------------------------------------------------------------
+# A proof by induction over `inductionVar` is graded like two ordinary
+# derivations: the base case reduces P(0) to a tautology, and the inductive step
+# reduces P(k+1) to a tautology while licensed to substitute the hypothesis P(k).
+# The induction schema itself (Nat.rec) is sound, so two certified obligations
+# certify ∀n.P(n). grade.py additionally runs lean_induction as a kernel backstop
+# (it guards against inconsistent transmitted `definitions`). Crucially this reads
+# the submission — an empty/garbage proof can no longer be auto-certified.
+def substitute(node: dict, var: str, repl: dict) -> dict:
+    """Replace every `variable var` in `node` with `repl` (structural)."""
+    if node.get("type") == "variable" and str(node.get("value")) == var:
+        return copy.deepcopy(repl)
+    if "slots" not in node:
+        return copy.deepcopy(node)
+    out: dict = {"type": node["type"]}
+    if "value" in node:
+        out["value"] = node["value"]
+    out["slots"] = {k: [substitute(c, var, repl) for c in v]
+                    for k, v in node["slots"].items()}
+    return out
+
+
+def _is_reflexive(node: dict) -> bool:
+    """True when `node` is an equality whose two sides are syntactically equal."""
+    if node.get("type") != "eq":
+        return False
+    s = node["slots"]
+    return s["left"][0] == s["right"][0]
+
+
+def induction_rules(ex: dict) -> dict[str, ProvenRule]:
+    """Proven catalogue + the transmitted recursive `definitions` (pow_zero/…)
+    as rewrite rules. The definitions are definitional equalities; the Lean
+    backstop in grade.py re-checks them, so an inconsistent definition cannot
+    yield a certified verdict."""
+    rules = dict(BY_ID)
+    for d in (ex.get("definitions") or []):
+        if d.get("id") and d.get("lhs") and d.get("rhs"):
+            rules[str(d["id"])] = proven_from_custom(d, str(d["id"]))
+    for r in (ex.get("rules") or []):
+        if isinstance(r, dict) and r.get("id") and r.get("lhs") and r.get("rhs"):
+            rules[str(r["id"])] = proven_from_custom(r, str(r["id"]))
+    return rules
+
+
+def _check_case(source: dict, steps: list[dict], rules: dict[str, ProvenRule],
+                ih: tuple[dict, dict] | None) -> DerivationReport:
+    """Replay one induction case. `ih=(lhs,rhs)` licenses a kind-B substitution
+    by the inductive hypothesis (only in the step); the base passes ih=None."""
+    state = source
+    steps_out: list[dict] = []
+    for i, step in enumerate(steps):
+        if step.get("kind") == "B":
+            if ih is None:
+                r = "Leibniz substitution with no inductive hypothesis available"
+                steps_out.append({"index": i, "status": "open", "reason": r})
+                return DerivationReport("uncertifiable", None, steps_out, i, r)
+            eqn = step.get("equation")
+            if not (isinstance(eqn, list) and len(eqn) == 2
+                    and eqn[0] == ih[0] and eqn[1] == ih[1]):
+                r = "Leibniz substitution is not the inductive hypothesis"
+                steps_out.append({"index": i, "status": "invalid", "reason": r})
+                return DerivationReport("invalid", None, steps_out, i, r)
+            path = tuple(step.get("path", []))
+            try:
+                target = at(state, path)
+            except (IndexError, KeyError):
+                r = f"path {list(path)} is not in the expression"
+                steps_out.append({"index": i, "status": "invalid", "reason": r})
+                return DerivationReport("invalid", None, steps_out, i, r)
+            if target != ih[0]:
+                r = "the substituted subterm is not the inductive hypothesis' LHS"
+                steps_out.append({"index": i, "status": "invalid", "reason": r})
+                return DerivationReport("invalid", None, steps_out, i, r)
+            result = replace(state, path, copy.deepcopy(ih[1]))
+            claimed = step.get("result")
+            if claimed is not None and claimed != result:
+                r = "claimed result does not match the inductive-hypothesis substitution"
+                steps_out.append({"index": i, "status": "invalid", "reason": r})
+                return DerivationReport("invalid", None, steps_out, i, r)
+            steps_out.append({"index": i, "status": "valid", "reason": "inductive hypothesis"})
+            state = result
+            continue
+        res = check_step(state, step, rules)
+        if res.status == "invalid":
+            steps_out.append({"index": i, "status": "invalid", "reason": res.reason})
+            return DerivationReport("invalid", None, steps_out, i, res.reason)
+        if res.status == "uncertifiable":
+            steps_out.append({"index": i, "status": "open", "reason": res.reason})
+            return DerivationReport("uncertifiable", None, steps_out, i, res.reason)
+        steps_out.append({"index": i, "status": "valid", "reason": f"Lean: {res.lean}"})
+        state = res.result
+    return DerivationReport("certified", state, steps_out)
+
+
+@dataclass
+class InductionReport:
+    status: str                  # "certified" | "invalid" | "uncertifiable"
+    reason: str = ""
+    base: DerivationReport | None = None
+    step: DerivationReport | None = None
+
+
+def check_induction(ex: dict, sub: dict) -> InductionReport:
+    """Certify the submitted base + inductive-step derivations for an induction
+    exercise. Returns "invalid" (a wrong step or a missing obligation),
+    "uncertifiable" (valid but unfinished / outside the proven fragment), or
+    "certified" (both obligations reduce their goal to a tautology)."""
+    goal = ex.get("goal")
+    var = ex.get("inductionVar")
+    if not goal or goal.get("type") != "eq" or not var:
+        return InductionReport("uncertifiable",
+                               "induction goal must be an equality with an inductionVar")
+    var = str(var)
+    base_steps = (sub.get("base") or {}).get("steps")
+    step_steps = (sub.get("step") or {}).get("steps")
+    if not base_steps or not step_steps:
+        return InductionReport("invalid",
+                               "incomplete induction proof: both a base-case and an "
+                               "inductive-step derivation are required")
+
+    rules = induction_rules(ex)
+    base_goal = substitute(goal, var, _num(0))
+    succ = {"type": "succ", "slots": {"inner": [{"type": "variable", "value": var}]}}
+    step_goal = substitute(goal, var, succ)
+    ih = (goal["slots"]["left"][0], goal["slots"]["right"][0])  # P(var)
+
+    base = _check_case(base_goal, base_steps, rules, ih=None)
+    if base.status != "certified":
+        return InductionReport(base.status, f"base case: {base.reason}", base=base)
+    if not _is_reflexive(base.final):
+        return InductionReport("uncertifiable",
+                               "base case did not reduce both sides to a common form", base=base)
+
+    step = _check_case(step_goal, step_steps, rules, ih=ih)
+    if step.status != "certified":
+        return InductionReport(step.status, f"inductive step: {step.reason}", base=base, step=step)
+    if not _is_reflexive(step.final):
+        return InductionReport("uncertifiable",
+                               "inductive step did not reduce both sides to a common form",
+                               base=base, step=step)
+    return InductionReport("certified",
+                           "base case and inductive step both certified", base=base, step=step)

@@ -49,20 +49,37 @@ def grade(request: dict) -> dict:
     ex = request.get("exercise") or {}
     sub = request.get("submission") or {}
 
-    # Induction is exactly where a formal backend earns its keep: certify the
-    # base∧step ⟹ ∀n leap with a real Lean `induction` (Nat.rec) kernel run. If
-    # Lean accepts, the claim is certified; otherwise honestly inconclusive.
+    # Induction is exactly where a formal backend earns its keep. We grade the
+    # STUDENT's submission: certify their base-case and inductive-step derivations
+    # (the inductive step may substitute the hypothesis P(k)). Only if both
+    # obligations check do we run lean_induction as a kernel backstop — it proves
+    # ∀n.P(n) via Nat.rec and guards against inconsistent transmitted definitions.
+    # An empty or wrong proof is never certified (it grades 0/`unknown`, not 100).
     if ex.get("mode") == "induction":
+        rep = lean_check.check_induction(ex, sub)
+        meta = {"induction": {"var": ex.get("inductionVar"), "submission": rep.status,
+                              "reason": rep.reason}}
+        if rep.status == "invalid":
+            return _envelope("invalid_derivation", 0, False, meta=meta,
+                             feedback=f"Invalid induction proof: {rep.reason}.")
+        if rep.status == "uncertifiable":
+            return _envelope("unknown", None, False, meta=meta,
+                             feedback=f"Leanregate could not certify this induction: "
+                                      f"{rep.reason}. Route to review.")
+        # Both obligations certified — backstop with the Lean kernel.
         res = lean_induction.certify(ex)
-        meta = {"induction": {"method": res.method, "var": ex.get("inductionVar"), "detail": res.detail}}
+        meta["induction"]["leanBackstop"] = res.method
+        meta["induction"]["detail"] = res.detail
         if res.certified:
             return _envelope("proven_equal", 100, True, meta=meta,
-                             feedback="Certified: ∀n. P(n) proven by Lean induction (Nat.rec).")
+                             feedback="Certified: base case and inductive step verified; "
+                                      "∀n. P(n) follows by Lean induction (Nat.rec).")
         reason = {"unavailable": "the Lean toolchain is unavailable in this deployment",
                   "untranslatable": f"the goal is outside the certifiable fragment ({res.detail})",
-                  "rejected": "Lean could not certify the inductive claim"}.get(res.method, res.detail)
+                  "rejected": "Lean could not confirm the inductive claim"}.get(res.method, res.detail)
         return _envelope("unknown", None, False, meta=meta,
-                         feedback=f"Leanregate could not certify this induction: {reason}. Route to review.")
+                         feedback=f"Base and step verified, but the Lean backstop did not "
+                                  f"certify the goal: {reason}. Route to review.")
     if "source" not in ex:
         raise RequestError("exercise.source is required")
     if ex.get("mode", "transformation") == "transformation" and ex.get("target") is None:
