@@ -46,3 +46,33 @@ jobs:
         env:
           LEANREGATE_LEAN_PROJECT: ${{ github.workspace }}/backends/leanregate
         run: python check_induction.py --require-lean
+
+  coqregate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.13" }
+      # `coq` from apt carries coqc + the stdlib (ring/field/lia) — no Mathlib.
+      - name: install Coq
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends coq
+      - name: coqregate unit tests
+        run: python backends/coqregate/tests/test_coq_prover.py
+      - name: emitted induction proofs kernel-check (live coqc)
+        working-directory: backends/coqregate
+        run: python check_induction.py --require-coq
+
+  cvc5regate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.13" }
+      # Single static solver binary — no library to build.
+      - name: install cvc5
+        run: pip install cvc5
+      - name: cvc5regate unit tests
+        run: python backends/cvc5regate/tests/test_cvc5_prover.py
+      - name: emitted induction goals solved (live cvc5)
+        working-directory: backends/cvc5regate
+        run: python check_induction.py --require-cvc5

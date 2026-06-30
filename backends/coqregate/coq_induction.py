@@ -1,0 +1,279 @@
+"""Certify a proof by induction over ℕ with a real Rocq/Coq kernel run.
+
+Eggregate grades the two obligations (base, step) soundly but can only *assert*
+the induction schema (`base ∧ step ⟹ ∀n.P(n)`). This module is where coqregate
+earns its keep: it translates the induction goal + its recursive definitions into
+Coq, emits an `induction n` proof, and **kernel-checks it** — turning eggregate's
+deferred `equal_no_certificate` into a certified verdict. It is the direct
+analogue of Leanregate's `lean_induction`, but lighter: Coq's `ring`/`field`/`lia`
+ship in the standard library, so there is no Mathlib-scale dependency.
+
+Honest by construction (same as `coq_prover`): if Coq accepts the proof the claim
+is certified; if Coq rejects it, the goal is outside the supported fragment, or
+the toolchain is absent, we report not-certified and `grade.py` returns
+`unknown` — never a false grade.
+
+Supported fragment (a first slice, identical to lean_induction): a ℚ-valued
+equality over `+ - *`/`pow`/`succ`/literals, with the induction variable (and any
+other exponents) typed ℕ and all other variables ℚ, and `pow` defined by the two
+transmitted rules `pow(a,0) → base` and `pow(a,S n) → step`. Anything else ⇒ not
+certified (`unknown`).
+
+## Qeq (`==`) vs Leibniz (`=`) — the key translation decision
+
+Coq's rationals are `QArith`'s `Q` (a pair numerator # denominator). Two `Q`
+values that denote the same rational — e.g. `2#4` and `1#2` — are *propositionally
+distinct* under Leibniz equality `=`, but equal under `Qeq`, written `==`. The
+`Q` ring/field instances (and hence `ring`/`field`) are therefore declared over
+the **setoid equality `Qeq`**, not `=`. We deliberately state and prove the goal
+as `lhs == rhs` (Qeq): this is the mathematically correct notion of rational
+equality, and it is the only one `ring`/`field` can discharge. (Proving Leibniz
+`=` would fail on `ring` and force brittle `Qreduction` normalisation for no
+semantic gain.) The MathNode `eq` node thus maps to `==`.
+
+stdlib-only; shares no code with Eggregate or Leanregate — only the protocol.
+"""
+from __future__ import annotations
+
+import copy
+import hashlib
+from dataclasses import dataclass
+
+import coq_prover  # reuse the kernel seam: check_source, coq_available, caching
+
+FUN = "pw"           # the Coq name for the model's `pow` node
+THEOREM = "regate_induction"
+
+
+class InductionError(ValueError):
+    """The induction goal/definitions are outside the supported Coq fragment."""
+
+
+# ---------------------------------------------------------------------------
+# Typing: which variables are ℕ (exponents / the induction var) vs ℚ.
+# Mirrors lean_induction._infer one-for-one (the model is backend-agnostic).
+# ---------------------------------------------------------------------------
+def _infer(node: dict, dom: str, env: dict[str, str]) -> None:
+    t = node.get("type")
+    if t == "variable":
+        name = str(node["value"])
+        if env.get(name, dom) != dom:
+            raise InductionError(f"variable {name!r} is used as both ℚ and ℕ")
+        env[name] = dom
+        return
+    if t == "number":
+        return
+    s = node.get("slots") or {}
+    if t == "succ":
+        _infer(s["inner"][0], "N", env)
+    elif t == "pow":
+        _infer(s["base"][0], "Q", env)
+        _infer(s["exponent"][0], "N", env)
+    elif t == "frac":
+        _infer(s["numerator"][0], "Q", env)
+        _infer(s["denominator"][0], "Q", env)
+    elif t in ("add", "sub", "mul"):
+        _infer(s["left"][0], dom, env)
+        _infer(s["right"][0], dom, env)
+    elif t == "neg":
+        _infer(s["inner"][0], dom, env)
+    elif t == "eq":
+        _infer(s["left"][0], "Q", env)
+        _infer(s["right"][0], "Q", env)
+    else:
+        raise InductionError(f"cannot type node type {t!r}")
+
+
+# ---------------------------------------------------------------------------
+# MathNode -> Coq term, domain-aware (ℚ or ℕ).
+#
+# The file opens `Q_scope`, so ℚ operators/numerals are the default. ℕ
+# subterms (exponents) must be forced into `nat` scope, so every `pow`
+# application wraps its exponent in `(...)%nat` — inside which `+ - * S` and
+# numerals parse as ℕ.
+# ---------------------------------------------------------------------------
+_BIN = {"add": "+", "sub": "-", "mul": "*"}
+
+
+def _term(node: dict, dom: str) -> str:
+    t = node.get("type")
+    if t in ("variable", "wild"):
+        return str(node["value"])
+    if t == "number":
+        # In Q_scope a bare numeral is a ℚ literal; ℕ numerals sit inside a
+        # `(...)%nat` region (the pow exponent) so a bare numeral is fine there.
+        return str(node["value"])
+    s = node["slots"]
+    if t == "succ":
+        return f"(S {_term(s['inner'][0], 'N')})"
+    if t == "pow":
+        # base is ℚ; the exponent is ℕ — force nat scope around it.
+        return f"({FUN} {_term(s['base'][0], 'Q')} ({_term(s['exponent'][0], 'N')})%nat)"
+    if t in _BIN:
+        return f"({_term(s['left'][0], dom)} {_BIN[t]} {_term(s['right'][0], dom)})"
+    if t == "frac":
+        return f"({_term(s['numerator'][0], 'Q')} / {_term(s['denominator'][0], 'Q')})"
+    if t == "neg":
+        return f"(- {_term(s['inner'][0], dom)})"
+    raise InductionError(f"cannot translate node type {t!r}")
+
+
+# ---------------------------------------------------------------------------
+# The recursive `pw` definition, derived from the transmitted definitions.
+# ---------------------------------------------------------------------------
+def _wild_name(node: dict) -> str:
+    if node.get("type") not in ("wild", "variable"):
+        raise InductionError("expected a wildcard in the definition pattern")
+    return str(node["value"])
+
+
+def _rename(node: dict, mapping: dict[str, str]) -> dict:
+    """Copy `node`, remapping wildcard/variable names per `mapping`.
+
+    A Coq `Fixpoint` has fixed parameter names across both match branches, but
+    the transmitted base/succ rules may use different wildcard names. We rename
+    each rule's body to the canonical Fixpoint binders before translating."""
+    out = copy.deepcopy(node)
+
+    def go(n: dict) -> None:
+        if n.get("type") in ("wild", "variable"):
+            nm = str(n.get("value"))
+            if nm in mapping:
+                n["value"] = mapping[nm]
+            return
+        for children in (n.get("slots") or {}).values():
+            for ch in children:
+                go(ch)
+
+    go(out)
+    return out
+
+
+def _build_pow_def(definitions: list[dict]) -> str:
+    """`Fixpoint pw (a:Q)(n:nat) : Q` from `pow(a,0)→…` and `pow(a,S n)→…`.
+
+    Canonical binders: first param `a` (ℚ base), match binder `k` (ℕ predecessor)."""
+    base_rule = succ_rule = None
+    for d in definitions:
+        lhs = d.get("lhs", {})
+        if lhs.get("type") != "pow":
+            continue
+        exp = lhs["slots"]["exponent"][0]
+        if exp.get("type") == "number" and str(exp.get("value")) == "0":
+            base_rule = d
+        elif exp.get("type") == "succ":
+            succ_rule = d
+    if base_rule is None or succ_rule is None:
+        raise InductionError(
+            "pow needs a base rule (pow(a,0)→…) and a successor rule (pow(a,S n)→…)")
+
+    b_var = _wild_name(base_rule["lhs"]["slots"]["base"][0])
+    base_body = _term(_rename(base_rule["rhs"], {b_var: "a"}), "Q")
+
+    s_var = _wild_name(succ_rule["lhs"]["slots"]["base"][0])
+    rec_var = _wild_name(succ_rule["lhs"]["slots"]["exponent"][0]["slots"]["inner"][0])
+    succ_body = _term(_rename(succ_rule["rhs"], {s_var: "a", rec_var: "k"}), "Q")
+    return (
+        f"Fixpoint {FUN} (a : Q) (n : nat) : Q :=\n"
+        f"  match n with\n"
+        f"  | O => {base_body}\n"
+        f"  | S k => {succ_body}\n"
+        f"  end.\n"
+    )
+
+
+# ---------------------------------------------------------------------------
+# The whole Coq file: imports + definition + theorem + induction proof.
+# ---------------------------------------------------------------------------
+def build_source(ex: dict) -> str:
+    goal = ex.get("goal")
+    if not goal or goal.get("type") != "eq":
+        raise InductionError("induction goal must be an equality")
+    var = ex.get("inductionVar")
+    if not var:
+        raise InductionError("missing inductionVar")
+
+    env: dict[str, str] = {}
+    _infer(goal, "Q", env)
+    if env.get(var) != "N":
+        raise InductionError(f"induction variable {var!r} must be a ℕ (exponent) variable")
+
+    q_vars = sorted(v for v, d in env.items() if d == "Q")
+    n_vars = sorted(v for v, d in env.items() if d == "N")
+    fresh = next(c for c in ("k", "m", "p", "q", "i", "j") if c not in env)
+    ihn = "ih" if "ih" not in env else "ih0"
+
+    pow_def = _build_pow_def(ex.get("definitions") or [])
+    lhs = _term(goal["slots"]["left"][0], "Q")
+    rhs = _term(goal["slots"]["right"][0], "Q")
+
+    binder_groups = []
+    if q_vars:
+        binder_groups.append(f"({' '.join(q_vars)} : Q)")
+    binder_groups.append(f"({' '.join(n_vars)} : nat)")
+    binders = " ".join(binder_groups)
+    intro = " ".join(q_vars + n_vars)
+
+    # We prove the goal as a `Qeq` (`==`), the setoid equality `ring`/`field`
+    # discharge over ℚ — see the module docstring for why not Leibniz `=`.
+    #
+    # Both obligations: first normalise nat arithmetic the `induction` left in the
+    # exponent — `n + 0 → n` (Nat.add_0_r) for the base, `m + S k → S (m + k)`
+    # (Nat.add_succ_r) for the step — so `simpl` can unfold `pw` at `O`/`S _`.
+    # `repeat rewrite` is a no-op when the lemma does not apply, so the same line
+    # serves goals with and without `+` in the exponent. Then close, cheapest
+    # first: bare `ring`; forward IH rewrite (`1^n`, `aᵐ⁺ⁿ`); backward IH fold
+    # (`aⁿ·bⁿ=(a·b)ⁿ`, folding the product under one `pow`). `first` takes
+    # whichever closes; the backward fold is reached only after the forward
+    # rewrite fails, so it never loops on an IH with a literal RHS. All branches
+    # are sound — Coq's kernel re-checks the chosen one. (Verified on Rocq 9.1.1.)
+    norm = "repeat rewrite Nat.add_succ_r; repeat rewrite Nat.add_0_r; simpl"
+    return (
+        # `From Coq Require` works on both Coq 8.x and Rocq 9.x (deprecated-with-
+        # warning on 9.x, which coq_prover silences). Stdlib only — no Mathlib.
+        "From Coq Require Import QArith.\n"
+        "From Coq Require Import Arith.\n"
+        "From Coq Require Import Lia.\n"
+        "Open Scope Q_scope.\n\n"
+        f"{pow_def}\n"
+        f"Theorem {THEOREM} : forall {binders}, {lhs} == {rhs}.\n"
+        f"Proof.\n"
+        f"  intros {intro}.\n"
+        f"  induction {var} as [| {fresh} {ihn}].\n"
+        f"  - {norm}; first [ ring | rewrite {ihn}; ring | rewrite <- {ihn}; ring ].\n"
+        f"  - {norm}; first [ ring | rewrite {ihn}; ring | rewrite <- {ihn}; ring "
+        f"| (field; lia) ].\n"
+        f"Qed.\n"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Public API.
+# ---------------------------------------------------------------------------
+@dataclass
+class CertifyResult:
+    certified: bool
+    method: str      # "induction" | "rejected" | "unavailable" | "untranslatable"
+    detail: str = ""
+
+
+_CACHE: dict[str, CertifyResult] = {}
+
+
+def certify(ex: dict) -> CertifyResult:
+    """Certify `∀ inductionVar. goal` with a Coq `induction` kernel run."""
+    try:
+        source = build_source(ex)
+    except InductionError as e:
+        return CertifyResult(False, "untranslatable", str(e))
+
+    key = hashlib.sha256(source.encode()).hexdigest()
+    if key in _CACHE:
+        return _CACHE[key]
+    if not coq_prover.coq_available():
+        return CertifyResult(False, "unavailable", "coq toolchain unavailable")
+
+    ok, detail = coq_prover.check_source(source)
+    result = CertifyResult(True, "induction") if ok else CertifyResult(False, "rejected", detail)
+    _CACHE[key] = result
+    return result

@@ -54,9 +54,8 @@ only.
 
 Eggregate implements a language-agnostic grading contract,
 **[`GRADING_PROTOCOL.md`](../../GRADING_PROTOCOL.md)** (`GradeRequest` → `GradeResponse`,
-MathNode JSON). A sibling backend, **Leanregate** (`../leanregate`, Lean / formal),
-speaks the *same* contract, so Artemis integrates once and treats the two as
-interchangeable containers, selected per exercise.
+MathNode JSON). Artemis integrates against that contract once and runs this backend
+as a self-contained, pluggable container, selected per exercise.
 
 ```sh
 docker build -t eggregate .

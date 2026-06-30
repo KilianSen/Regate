@@ -36,6 +36,20 @@ BACKENDS = {
                               f"{sys.executable} {ROOT}/backends/leanregate/grade.py --cli"),
         "cwd": ROOT,
     },
+    # Certifier backends — only exercised by fixtures that carry an
+    # `expect.coqregate` / `expect.cvc5regate`. Their verdict on a *correct*
+    # induction is toolchain-dependent (`proven_equal` with coqc/cvc5 present,
+    # `unknown` without), so gate any such fixture on the tool being installed.
+    "coqregate": {
+        "cmd": os.environ.get("COQREGATE_CMD",
+                              f"{sys.executable} {ROOT}/backends/coqregate/grade.py --cli"),
+        "cwd": ROOT,
+    },
+    "cvc5regate": {
+        "cmd": os.environ.get("CVC5REGATE_CMD",
+                              f"{sys.executable} {ROOT}/backends/cvc5regate/grade.py --cli"),
+        "cwd": ROOT,
+    },
 }
 
 ENVELOPE = ("protocol", "backend", "outcome", "score", "certified")
