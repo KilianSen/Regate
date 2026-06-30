@@ -34,7 +34,13 @@ jobs:
       - uses: leanprover/lean-action@v1
         with:
           lake-package-directory: backends/leanregate
-      # builds & checks backends/leanregate/Leanregate/Basic.lean (the verified rule library)
+          build: false            # no Lean library to build — rules come from the API
+      # Leanregate has no Basic.lean. Its formal guarantee is exercised live: fetch
+      # Mathlib's oleans, then have the runtime prover emit + kernel-check the
+      # induction proofs. A regressed prover/emitter fails CI here.
+      - name: fetch Mathlib oleans
+        working-directory: backends/leanregate
+        run: lake exe cache get
       - name: emitted induction proofs kernel-check (live Lean)
         working-directory: backends/leanregate
         env:

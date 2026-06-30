@@ -22,7 +22,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app/leanproj
 COPY backends/leanregate/lakefile.toml backends/leanregate/lean-toolchain ./
-COPY backends/leanregate/Leanregate ./Leanregate
 
 # elan installs the lean/lake version pinned by lean-toolchain; lake then fetches
 # Mathlib's *prebuilt* oleans (`cache get`) instead of compiling from scratch.

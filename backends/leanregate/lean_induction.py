@@ -161,8 +161,8 @@ def build_source(ex: dict) -> str:
     binders += f" ({' '.join(n_vars)} : ℕ)"
     intro = " ".join(q_vars + n_vars)
     return (
-        # Same imports the proven rule library (Basic.lean) compiles with, so they
-        # are guaranteed present in the build cache: ℚ + the tactic suite.
+        # The ℚ + tactic-suite imports the prover's auto-prove path uses, so they
+        # are guaranteed present in the (pruned) build cache.
         "import Mathlib.Data.Rat.Defs\n"
         "import Mathlib.Tactic\n\n"
         f"{pow_def}\n"

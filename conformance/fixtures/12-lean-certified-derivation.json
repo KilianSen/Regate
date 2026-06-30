@@ -47,8 +47,9 @@
       "score": 100
     },
     "leanregate": {
-      "outcome": "proven_equal",
-      "score": 100
+      "outcome": "unknown",
+      "score": null
     }
-  }
+  },
+  "note": "Built-in rule ids are no longer a leanregate concept (rules come from the API). Lean-free, leanregate returns `unknown`; with an inline ruleset + Lean container it certifies. See 13-leanregate-runtime-ruleset for the inline-ruleset path."
 }

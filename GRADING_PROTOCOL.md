@@ -37,8 +37,11 @@ Expressions use the persisted **MathNode** JSON shape (Artemis
     // The ruleset travels in the request — it is NOT hardcoded in the backend.
     // Either supply full instructor-authored definitions inline:
     "ruleset": [ <Rule>, ... ],
-    // ...or reference the backend's built-in catalogue by id (convenience):
+    // ...or reference a backend's built-in catalogue by id (convenience):
     "rules": ["add_zero_right", ...] | "ALL",   // used only if "ruleset" is absent
+    // NOTE: leanregate has NO built-in catalogue (rules come from the API and are
+    // proven at request time); it ignores "rules" ids and grades them `unknown`.
+    // Supply "ruleset" inline for leanregate. Eggregate supports both.
 
     "reference": [<MathNode>, ...] | null, // optional sample-solution states (source..target)
 

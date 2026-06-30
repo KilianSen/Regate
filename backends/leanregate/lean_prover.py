@@ -25,7 +25,8 @@ scaffold had, now extended to dynamically-supplied rules.
 
 Lean runs in-process via `lake env lean` on a generated file inside a prebuilt
 Mathlib project (`LEANREGATE_LEAN_PROJECT`). If the toolchain is absent the
-prover reports `unavailable` and `grade.py` degrades to the built-in catalogue.
+prover reports `unavailable` and `grade.py` grades `unknown` (no rules can be
+proven; Leanregate has no built-in catalogue to fall back to).
 
 stdlib-only; shares no code with Eggregate — only the protocol.
 """
@@ -178,7 +179,7 @@ def _carried_source(rule: dict) -> str:
     """A Lean file that states the rule and discharges it with the supplied proof.
 
     Imports the tactic suite + ℚ defs rather than all of `import Mathlib`. This is
-    the SAME surface as Basic.lean and the induction emitter, which lets the image
+    the SAME surface as the induction emitter, which lets the image
     ship only the transitive olean closure of `Mathlib.Tactic` (see the Dockerfile's
     prune step) instead of every Mathlib olean. A carried proof keeps the full
     tactic suite (ring/field_simp/linarith/nlinarith/positivity/norm_num/omega/…);

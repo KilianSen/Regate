@@ -1,9 +1,9 @@
+# Leanregate has no Lean library of its own: rules come from the API and are
+# proven at request time by lean_prover. This package exists only to pull Mathlib,
+# whose prebuilt oleans the runtime prover elaborates against. There is no
+# `Basic.lean` and nothing to `lake build`.
 name = "leanregate"
-defaultTargets = ["Leanregate"]
 
 [[require]]
 name = "mathlib"
 scope = "leanprover-community"
-
-[[lean_lib]]
-name = "Leanregate"

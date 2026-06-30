@@ -17,8 +17,8 @@ gate:                 ## rule-library soundness gate (non-zero on an unsound rul
 conformance:          ## run every fixture through BOTH backends' CLIs
 	$(PY) conformance/run_conformance.py
 
-lean:                 ## build & check the Lean verified rule library
-	cd backends/leanregate && lake build
+lean:                 ## fetch Mathlib oleans for the runtime prover (no rule library to build)
+	cd backends/leanregate && lake update && lake exe cache get
 
 docker:               ## build both backend images (context = repo root)
 	docker build -f backends/eggregate/Dockerfile -t eggregate .

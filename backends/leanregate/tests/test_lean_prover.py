@@ -16,7 +16,14 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import grade
 import lean_check
 import lean_prover
-from lean_check import _bin, _frac, _num, _neg, A, B, C
+
+# MathNode builders (local to the test; leanregate has no built-in rule library).
+def _wild(name): return {"type": "wild", "value": name}
+def _num(v): return {"type": "number", "value": str(v)}
+def _bin(op, l, r): return {"type": op, "slots": {"left": [l], "right": [r]}}
+def _frac(n, d): return {"type": "frac", "slots": {"numerator": [n], "denominator": [d]}}
+def _neg(x): return {"type": "neg", "slots": {"inner": [x]}}
+A, B, C = _wild("a"), _wild("b"), _wild("c")
 
 
 # --- a stub Lean: succeeds on a configurable allow-list of theorem bodies ------
@@ -122,13 +129,19 @@ def test_grade_unknown_when_rule_unproven():
 
 
 def test_grade_unknown_when_lean_unavailable():
+    # No toolchain ⇒ the transmitted ruleset cannot be proven ⇒ a step using it is
+    # uncertifiable ⇒ unknown (rules come from the API; there is no fallback library).
     lean_prover._CACHE.clear()
     lean_prover.lean_available = lambda: False          # type: ignore[assignment]
+    x = {"type": "variable", "value": "x"}
+    y = {"type": "variable", "value": "y"}
     req = {"protocol": "1.0",
-           "exercise": {"mode": "transformation", "source": _num(1), "target": _num(1),
+           "exercise": {"mode": "transformation", "source": _bin("add", x, y),
+                        "target": _bin("add", y, x),
                         "ruleset": [{"id": "x", "lhs": _bin("add", A, B), "rhs": _bin("add", B, A),
-                                     "conditions": []}]},
-           "submission": {"final": _num(1)}}
+                                     "bidirectional": True, "conditions": []}]},
+           "submission": {"steps": [{"kind": "A", "rule": "x", "path": [],
+                                     "direction": "forward"}]}}
     resp = grade.grade(req)
     assert resp["outcome"] == "unknown"
 

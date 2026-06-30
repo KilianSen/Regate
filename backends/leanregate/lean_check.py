@@ -1,17 +1,18 @@
-"""A formal step-checker for Leanregate — the piece that consumes the proven
-rule library (`Leanregate/Basic.lean`).
+"""A formal step-checker for Leanregate.
 
 Leanregate's claim is *formal* soundness: a derivation is graded by checking each
-step is an **instance of a lemma proven in Lean**. This module is that check. It
-is stdlib-only (shares no code with Eggregate — only the protocol) and operates
-directly on the MathNode JSON shape.
+step is an **instance of a rule the Lean kernel proved for this request**. This
+module is that check. It is stdlib-only (shares no code with Eggregate — only the
+protocol) and operates directly on the MathNode JSON shape.
 
-The proven rule table below mirrors `Basic.lean` one-for-one: each entry names
-the Lean theorem that certifies it. A step that instantiates one of these lemmas
-at its path is certified; a step that needs a side condition Lean would demand
-(the guarded fraction rules) or uses a rule with no proof is **not** certified —
-the grader returns `unknown` there rather than a false grade. That asymmetry is
-the whole point: Leanregate certifies only what Lean has proven.
+There is no built-in rule library and no `Basic.lean`: rules come from the API.
+Each rule is transmitted in `exercise.ruleset`, proven at request time by
+`lean_prover`, and passed in as a `ProvenRule` table (`grade._prove_ruleset`). A
+step that instantiates one of those proven rules at its path is certified; a step
+that needs a side condition Lean would demand (a guarded rule) or uses a rule with
+no proof is **not** certified — the grader returns `unknown` rather than a false
+grade. That asymmetry is the whole point: Leanregate certifies only what Lean has
+just proven.
 
 Path encoding matches the protocol / Eggregate `model.py`: a path integer indexes
 the flat child list obtained by visiting slots in *alphabetical* order (so a
@@ -26,27 +27,8 @@ from dataclasses import dataclass
 # ---------------------------------------------------------------------------
 # MathNode JSON helpers (the persisted {type, value?, slots} shape).
 # ---------------------------------------------------------------------------
-def _wild(name: str) -> dict:
-    return {"type": "wild", "value": name}
-
-
 def _num(v) -> dict:
     return {"type": "number", "value": str(v)}
-
-
-def _bin(op: str, left: dict, right: dict) -> dict:
-    return {"type": op, "slots": {"left": [left], "right": [right]}}
-
-
-def _frac(numerator: dict, denominator: dict) -> dict:
-    return {"type": "frac", "slots": {"numerator": [numerator], "denominator": [denominator]}}
-
-
-def _neg(inner: dict) -> dict:
-    return {"type": "neg", "slots": {"inner": [inner]}}
-
-
-A, B, C = _wild("a"), _wild("b"), _wild("c")
 
 
 def _flat_slots(node: dict) -> list[tuple[str, int]]:
@@ -122,51 +104,21 @@ def instantiate(template: dict, env: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# The proven rule library — one entry per lemma in Basic.lean.
+# A rule the Lean kernel has proven sound for THIS request.
 # ---------------------------------------------------------------------------
+# Leanregate has no built-in rule library: rules come from the API. Every rule is
+# transmitted in `exercise.ruleset` and proven at request time by `lean_prover`
+# (ring/field_simp + proof-carrying); a proven rule becomes a `ProvenRule` here
+# via `proven_from_custom`. There is no static catalogue and no `Basic.lean` — a
+# derivation can only be certified against rules the kernel has just proven.
 @dataclass(frozen=True)
 class ProvenRule:
     id: str
     lhs: dict
     rhs: dict
-    lean: str            # the theorem name in Basic.lean that certifies it
+    lean: str            # the Lean theorem name that certified this rule at request time
     bidir: bool = False
     guarded: bool = False  # needs a ≠0 hypothesis Lean would demand; not auto-discharged
-
-
-PROVEN: list[ProvenRule] = [
-    # -- Add --
-    ProvenRule("add_comm",       _bin("add", A, B), _bin("add", B, A), "add_comm'", bidir=True),
-    ProvenRule("add_assoc",      _bin("add", _bin("add", A, B), C), _bin("add", A, _bin("add", B, C)), "add_assoc'", bidir=True),
-    ProvenRule("add_zero_left",  _bin("add", _num(0), A), A, "add_zero_left"),
-    ProvenRule("add_zero_right", _bin("add", A, _num(0)), A, "add_zero_right"),
-    # -- Sub --
-    ProvenRule("sub_zero_right", _bin("sub", A, _num(0)), A, "sub_zero_right"),
-    ProvenRule("sub_self",       _bin("sub", A, A), _num(0), "sub_self'"),
-    ProvenRule("sub_as_add_neg", _bin("sub", A, B), _bin("add", A, _neg(B)), "sub_as_add_neg", bidir=True),
-    # -- Mul --
-    ProvenRule("mul_comm",         _bin("mul", A, B), _bin("mul", B, A), "mul_comm'", bidir=True),
-    ProvenRule("mul_assoc",        _bin("mul", _bin("mul", A, B), C), _bin("mul", A, _bin("mul", B, C)), "mul_assoc'", bidir=True),
-    ProvenRule("mul_one_left",     _bin("mul", _num(1), A), A, "mul_one_left"),
-    ProvenRule("mul_one_right",    _bin("mul", A, _num(1)), A, "mul_one_right"),
-    ProvenRule("mul_zero_left",    _bin("mul", _num(0), A), _num(0), "mul_zero_left"),
-    ProvenRule("mul_zero_right",   _bin("mul", A, _num(0)), _num(0), "mul_zero_right"),
-    ProvenRule("mul_distrib",      _bin("mul", A, _bin("add", B, C)), _bin("add", _bin("mul", A, B), _bin("mul", A, C)), "mul_distrib", bidir=True),
-    ProvenRule("mul_distrib_right", _bin("mul", _bin("add", B, C), A), _bin("add", _bin("mul", B, A), _bin("mul", C, A)), "mul_distrib_right", bidir=True),
-    # -- Negation --
-    ProvenRule("neg_neg",     _neg(_neg(A)), A, "neg_neg'", bidir=True),
-    ProvenRule("neg_zero",    _neg(_num(0)), _num(0), "neg_zero"),
-    ProvenRule("add_inverse", _bin("add", A, _neg(A)), _num(0), "add_inverse"),
-    # -- Equality (relational; proven via eq_comm) --
-    ProvenRule("eq_symm", _bin("eq", A, B), _bin("eq", B, A), "eq_symm'", bidir=True),
-    # -- Fraction: guarded. Lean states these only under a ≠0 hypothesis, so the
-    #    checker cannot certify them without a discharged assumption. --
-    ProvenRule("frac_one_denom", _frac(A, _num(1)), A, "frac_one_denom"),
-    ProvenRule("frac_self_one", _frac(A, A), _num(1), "frac_self_one", guarded=True),
-    ProvenRule("frac_mul_cancel_left", _frac(_bin("mul", C, A), _bin("mul", C, B)), _frac(A, B), "frac_mul_cancel_left", guarded=True),
-]
-
-BY_ID: dict[str, ProvenRule] = {r.id: r for r in PROVEN}
 
 
 def proven_from_custom(rule: dict, lean: str) -> ProvenRule:
@@ -198,16 +150,16 @@ class StepCheck:
 
 
 def check_step(state: dict, step: dict, rules: dict[str, ProvenRule] | None = None) -> StepCheck:
-    """Check one derivation step against a proven library (`rules`, default the
-    built-in `BY_ID`; runtime-proven custom rulesets pass their own table).
+    """Check one derivation step against the rules the kernel proved for this
+    request (`rules`; empty if none were transmitted/proven).
 
-    "valid"          — an instance of a proven (unguarded) lemma; result computed.
+    "valid"          — an instance of a proven (unguarded) rule; result computed.
     "invalid"        — the rule does not apply at the path, or the claimed result
-                       disagrees with the lemma's output (a fabricated step).
+                       disagrees with the rule's output (a fabricated step).
     "uncertifiable"  — structurally fine but Lean would require a side condition,
                        or the rule has no proof; Leanregate will not grade it.
     """
-    rules = BY_ID if rules is None else rules
+    rules = rules or {}
     if step.get("kind", "A") == "B":
         return StepCheck("uncertifiable", None,
                          "Leibniz substitution (kind B) is not yet wired to a Lean proof")
@@ -248,8 +200,8 @@ class DerivationReport:
 
 def check_derivation(source: dict, steps: list[dict],
                      rules: dict[str, ProvenRule] | None = None) -> DerivationReport:
-    """Replay a derivation, certifying each step against a proven library
-    (`rules`, default the built-in `BY_ID`)."""
+    """Replay a derivation, certifying each step against the rules proven for this
+    request (`rules`; empty ⇒ every rule step is uncertifiable)."""
     state = source
     steps_out: list[dict] = []
     for i, step in enumerate(steps):
@@ -297,18 +249,16 @@ def _is_reflexive(node: dict) -> bool:
     return s["left"][0] == s["right"][0]
 
 
-def induction_rules(ex: dict) -> dict[str, ProvenRule]:
-    """Proven catalogue + the transmitted recursive `definitions` (pow_zero/…)
-    as rewrite rules. The definitions are definitional equalities; the Lean
-    backstop in grade.py re-checks them, so an inconsistent definition cannot
-    yield a certified verdict."""
-    rules = dict(BY_ID)
+def induction_rules(ex: dict, proven: dict[str, ProvenRule]) -> dict[str, ProvenRule]:
+    """The kernel-proven inline rules (`proven`, from grade.py) plus the
+    transmitted recursive `definitions` (pow_zero/…) as rewrite rules. The
+    definitions are definitional equalities for the `def pw` the Lean backstop
+    builds; that backstop re-proves the whole goal, so an inconsistent definition
+    cannot yield a certified verdict."""
+    rules = dict(proven)
     for d in (ex.get("definitions") or []):
         if d.get("id") and d.get("lhs") and d.get("rhs"):
             rules[str(d["id"])] = proven_from_custom(d, str(d["id"]))
-    for r in (ex.get("rules") or []):
-        if isinstance(r, dict) and r.get("id") and r.get("lhs") and r.get("rhs"):
-            rules[str(r["id"])] = proven_from_custom(r, str(r["id"]))
     return rules
 
 
@@ -370,9 +320,11 @@ class InductionReport:
     step: DerivationReport | None = None
 
 
-def check_induction(ex: dict, sub: dict) -> InductionReport:
+def check_induction(ex: dict, sub: dict,
+                    proven: dict[str, ProvenRule] | None = None) -> InductionReport:
     """Certify the submitted base + inductive-step derivations for an induction
-    exercise. Returns "invalid" (a wrong step or a missing obligation),
+    exercise, using the kernel-proven inline rules (`proven`) + the transmitted
+    definitions. Returns "invalid" (a wrong step or a missing obligation),
     "uncertifiable" (valid but unfinished / outside the proven fragment), or
     "certified" (both obligations reduce their goal to a tautology)."""
     goal = ex.get("goal")
@@ -388,7 +340,7 @@ def check_induction(ex: dict, sub: dict) -> InductionReport:
                                "incomplete induction proof: both a base-case and an "
                                "inductive-step derivation are required")
 
-    rules = induction_rules(ex)
+    rules = induction_rules(ex, proven or {})
     base_goal = substitute(goal, var, _num(0))
     succ = {"type": "succ", "slots": {"inner": [{"type": "variable", "value": var}]}}
     step_goal = substitute(goal, var, succ)

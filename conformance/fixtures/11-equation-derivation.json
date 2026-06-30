@@ -72,8 +72,9 @@
       "score": 100
     },
     "leanregate": {
-      "outcome": "proven_equal",
-      "score": 100
+      "outcome": "unknown",
+      "score": null
     }
-  }
+  },
+  "note": "Leanregate has no built-in catalogue: rules come from the API and are proven at request time by the Lean kernel. This fixture references built-in rule ids, which leanregate no longer resolves; the Lean-free conformance harness therefore returns `unknown` (route to review). Eggregate still grades it. Leanregate certifies rule-based derivations only when the ruleset is transmitted inline and a Lean container proves it (see 13-leanregate-runtime-ruleset)."
 }

@@ -6,13 +6,14 @@
 Self-contained (stdlib only); shares no code with Eggregate — it shares only the
 *protocol* (GRADING_PROTOCOL.md), which is the point.
 
-Grading is *formal*: a submitted derivation is graded step-by-step by
-`lean_check`, which certifies each step is an instance of a lemma **proven in
-`Leanregate/Basic.lean`**. A derivation whose every step is certified and whose
-endpoint reaches the target (or, in equation mode, a reflexive `a = a`) is
-`proven_equal` with `certified=true`, its proof carrying the Lean lemma names.
-Anything Lean has not proven — a guarded fraction rule's side condition, an
-unknown rule, value-equivalence without a derivation — returns `unknown`:
+Grading is *formal*, and rules come from the API: there is no built-in rule
+library and no `Basic.lean`. Each rule is transmitted in `exercise.ruleset` and
+**proven at request time by a Lean kernel** (`lean_prover`); `lean_check` then
+certifies each derivation step is an instance of a just-proven rule. A derivation
+whose every step is certified and whose endpoint reaches the target (or, in
+equation mode, a reflexive `a = a`) is `proven_equal` with `certified=true`.
+Anything Lean has not proven — a guarded rule's side condition, a rule the kernel
+could not prove, value-equivalence without a derivation — returns `unknown`:
 honestly inconclusive, never a false grade.
 """
 from __future__ import annotations
@@ -43,22 +44,49 @@ def _envelope(outcome, score, certified, **extra):
     return base
 
 
+def _prove_ruleset(ex: dict) -> tuple[dict, dict]:
+    """Rules come from the API. Prove the transmitted `exercise.ruleset` at request
+    time with a Lean kernel (lean_prover); return (proven-rule table, meta). Rules
+    Lean cannot prove — or all of them, when the toolchain is absent — are simply
+    absent from the table, so any step using them grades `unknown`, never falsely.
+    Leanregate has no built-in catalogue; an empty ruleset means nothing certifies."""
+    ruleset = ex.get("ruleset")
+    if not ruleset:
+        return {}, {}
+    results = lean_prover.prove_ruleset(ruleset)
+    meta = {"ruleset": {rid: {"proven": r.proven, "method": r.method,
+                              "lemma": r.lemma, "detail": r.detail}
+                        for rid, r in results.items()}}
+    table: dict = {}
+    if lean_prover.lean_available():
+        for rule in ruleset:
+            res = results.get(str(rule.get("id")))
+            if res and res.proven:
+                pr = lean_check.proven_from_custom(rule, res.lemma)
+                table[pr.id] = pr
+    return table, meta
+
+
 def grade(request: dict) -> dict:
     if request.get("protocol", PROTOCOL).split(".")[0] != PROTOCOL.split(".")[0]:
         raise RequestError(f"unsupported protocol {request.get('protocol')!r}")
     ex = request.get("exercise") or {}
     sub = request.get("submission") or {}
 
+    # Rules come from the API: prove the transmitted ruleset at request time. This
+    # table feeds both the induction obligations and ordinary derivations.
+    rules_table, meta = _prove_ruleset(ex)
+
     # Induction is exactly where a formal backend earns its keep. We grade the
     # STUDENT's submission: certify their base-case and inductive-step derivations
-    # (the inductive step may substitute the hypothesis P(k)). Only if both
-    # obligations check do we run lean_induction as a kernel backstop — it proves
-    # ∀n.P(n) via Nat.rec and guards against inconsistent transmitted definitions.
-    # An empty or wrong proof is never certified (it grades 0/`unknown`, not 100).
+    # (the inductive step may substitute the hypothesis P(k)) against the proven
+    # rules + transmitted definitions. Only if both obligations check do we run
+    # lean_induction as a kernel backstop — it proves ∀n.P(n) via Nat.rec and guards
+    # against inconsistent definitions. An empty or wrong proof is never certified.
     if ex.get("mode") == "induction":
-        rep = lean_check.check_induction(ex, sub)
-        meta = {"induction": {"var": ex.get("inductionVar"), "submission": rep.status,
-                              "reason": rep.reason}}
+        rep = lean_check.check_induction(ex, sub, rules_table)
+        meta["induction"] = {"var": ex.get("inductionVar"), "submission": rep.status,
+                             "reason": rep.reason}
         if rep.status == "invalid":
             return _envelope("invalid_derivation", 0, False, meta=meta,
                              feedback=f"Invalid induction proof: {rep.reason}.")
@@ -91,34 +119,9 @@ def grade(request: dict) -> dict:
     target = ex.get("target")
     source = ex["source"]
 
-    # A formal backend may only grade with rules it has a proof for. The built-in
-    # `rules` ids map to lemmas in Basic.lean / lean_check.PROVEN. An inline
-    # `ruleset` arrives from a trusted author on the wire: rather than reject it,
-    # we *prove each rule at request time* with a Lean kernel in the container
-    # (lean_prover, hybrid ring/field_simp + proof-carrying). A rule Lean cannot
-    # prove is dropped from the table, so any step using it grades `unknown` —
-    # the same honesty as the scaffold, now extended to dynamic rulesets.
-    rules_table = None       # None => the built-in BY_ID catalogue
-    meta: dict = {}
-    if ex.get("ruleset"):
-        results = lean_prover.prove_ruleset(ex["ruleset"])
-        meta = {"ruleset": {rid: {"proven": r.proven, "method": r.method,
-                                  "lemma": r.lemma, "detail": r.detail}
-                            for rid, r in results.items()}}
-        if not lean_prover.lean_available():
-            return _envelope("unknown", None, False, meta=meta,
-                             feedback="Leanregate cannot prove the inline ruleset: the Lean "
-                                      "toolchain is unavailable in this deployment. Use "
-                                      "built-in rule ids or the Eggregate backend.")
-        rules_table = {}
-        for rule in ex["ruleset"]:
-            res = results.get(str(rule.get("id")))
-            if res and res.proven:
-                pr = lean_check.proven_from_custom(rule, res.lemma)
-                rules_table[pr.id] = pr
-
-    # 1) A submitted derivation: certify it step-by-step against the proven table
-    #    (built-in catalogue, or the runtime-proven custom ruleset).
+    # 1) A submitted derivation: certify it step-by-step against the rules proven
+    #    for this request (the transmitted ruleset). With no proven rules — an empty
+    #    ruleset, or no Lean toolchain — every rule step is uncertifiable → unknown.
     if sub.get("steps"):
         report = lean_check.check_derivation(source, sub["steps"], rules_table)
         if report.status == "invalid":
@@ -134,7 +137,7 @@ def grade(request: dict) -> dict:
             return _envelope("proven_equal", 100, True, steps=report.steps_out, proof=proof,
                              meta=meta,
                              feedback="Valid derivation; every step is an instance of a "
-                                      "Lean-proven lemma.")
+                                      "rule the Lean kernel proved for this request.")
         # Certified steps but not at the goal form: Leanregate does not grade
         # value-equivalence or partial credit (that is Eggregate's job).
         return _envelope("unknown", None, False, steps=report.steps_out, proof=proof, meta=meta,
