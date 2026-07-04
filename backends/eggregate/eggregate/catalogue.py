@@ -1,48 +1,27 @@
-"""The rewrite-rule catalogue (thesis Table 4 / Appendix A).
+"""The built-in sample ruleset (thesis Table 4 / Appendix A).
 
-This is the *single shared rule source* of Section 4.3.  Each rule is plain data
--- a left/right pattern over the expression model, a direction, and an optional
-side condition.  Two engines consume it without duplicating the rules:
-
-  * ``backend.py`` compiles each entry into an egglog rewrite (equality
-    saturation, for equivalence grading and hints);
-  * ``hints.py`` interprets each entry directly as a directed tree rewrite
-    (the step-by-step engine, mirroring the MS1 kernel).
+The rule *representation* and the wire (de)serialization live in ``rule.py`` --
+that is the contract the engine and the grading request depend on.  This module
+is only a **built-in ruleset for tests, demos, and the soundness gate**: the
+production path takes its rules from the request (``exercise.ruleset``), not from
+here.  Re-exports the representation so existing ``from .catalogue import Rule``
+call sites keep working.
 
 Wildcards ``a``, ``b``, ``c`` (block ``wild``) match arbitrary subtrees.
-``NotEqualToConstant`` is the one ``RuleConstraint`` implemented today
-(Section 6.3); ``frac_mul_cancel_left`` uses it to discharge ``c != 0``.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
-
-from .conditions import SideCondition
-from .model import MathNode, add, eq, frac, from_json, mul, neg, num, sub, to_json
-
-
-def wild(name: str) -> MathNode:
-    return MathNode("wild", name)
-
+from .model import add, eq, frac, mul, neg, num, sub
+from .rule import (  # noqa: F401  (re-exported for back-compat)
+    Rule,
+    nonzero,
+    rule_from_json,
+    rule_to_json,
+    ruleset_from_json,
+    wild,
+)
 
 a, b, c, d = wild("a"), wild("b"), wild("c"), wild("d")
-
-
-def nonzero(var: str) -> SideCondition:
-    return SideCondition("nonzero", var)
-
-
-@dataclass(frozen=True)
-class Rule:
-    """One rewrite rule from a BlockDefinition bean (thesis ``RewriteRule``)."""
-
-    id: str
-    owner: str            # the block that owns the rule
-    lhs: MathNode         # pattern
-    rhs: MathNode         # template
-    bidir: bool = False   # B = bidirectional, F = forward-only
-    # Guards that must be discharged before the rule may fire (Section 5).
-    conditions: tuple[SideCondition, ...] = ()
 
 
 # Table 4, verbatim.  F = forward-only, B = bidirectional.
@@ -98,52 +77,3 @@ BY_ID: dict[str, Rule] = {r.id: r for r in CATALOGUE}
 def rules(*ids: str) -> list[Rule]:
     """The subset of the catalogue an exercise makes available."""
     return [BY_ID[i] for i in ids]
-
-
-# ---------------------------------------------------------------------------
-# JSON (de)serialization — so a ruleset can travel in a grading request rather
-# than being hardcoded (thesis §6.3, instructor-authored rules).
-# ---------------------------------------------------------------------------
-_COND_KINDS = {"nonzero", "positive", "integer", "constant", "notequal"}
-
-
-def _condition_to_json(c: SideCondition) -> dict:
-    d = {"kind": c.kind, "var": c.var}
-    if c.arg is not None:
-        d["arg"] = c.arg
-    return d
-
-
-def _condition_from_json(d: dict) -> SideCondition:
-    kind = d["kind"]
-    if kind not in _COND_KINDS:
-        raise ValueError(f"unknown side-condition kind {kind!r}")
-    return SideCondition(kind, d["var"], d.get("arg"))
-
-
-def rule_to_json(r: Rule) -> dict:
-    return {"id": r.id, "owner": r.owner,
-            "lhs": to_json(r.lhs), "rhs": to_json(r.rhs),
-            "bidirectional": r.bidir,
-            "conditions": [_condition_to_json(c) for c in r.conditions]}
-
-
-def rule_from_json(d: dict) -> Rule:
-    if "id" not in d or "lhs" not in d or "rhs" not in d:
-        raise ValueError("rule needs id, lhs, rhs")
-    return Rule(str(d["id"]), str(d.get("owner", "")),
-                from_json(d["lhs"]), from_json(d["rhs"]),
-                bool(d.get("bidirectional", False)),
-                tuple(_condition_from_json(c) for c in d.get("conditions", [])))
-
-
-def ruleset_from_json(items: list[dict]) -> list[Rule]:
-    seen: set[str] = set()
-    out: list[Rule] = []
-    for d in items:
-        r = rule_from_json(d)
-        if r.id in seen:
-            raise ValueError(f"duplicate rule id {r.id!r}")
-        seen.add(r.id)
-        out.append(r)
-    return out

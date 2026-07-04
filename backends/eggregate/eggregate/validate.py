@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from .catalogue import Rule
+from .rule import Rule
 from .conditions import DISCHARGED, OPEN, VIOLATED, Assumption, SideCondition, discharge
 from .matching import instantiate, match
 from .model import MathNode, Path, pretty

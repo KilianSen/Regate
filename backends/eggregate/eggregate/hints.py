@@ -17,7 +17,7 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import dataclass
 
-from .catalogue import Rule
+from .rule import Rule
 from .conditions import DISCHARGED, discharge
 from .matching import instantiate, match
 from .model import MathNode, Path, distance, pretty

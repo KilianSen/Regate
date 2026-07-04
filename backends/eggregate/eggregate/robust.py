@@ -28,7 +28,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .backend import equivalent
-from .catalogue import BY_ID, CATALOGUE, Rule
+from .catalogue import BY_ID, CATALOGUE
+from .rule import Rule
 from .conditions import DISCHARGED, discharge
 from .hints import shortest_path
 from .matching import instantiate, match

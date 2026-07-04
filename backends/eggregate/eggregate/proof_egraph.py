@@ -25,7 +25,7 @@ from __future__ import annotations
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 
-from .catalogue import Rule
+from .rule import Rule
 from .conditions import DISCHARGED, discharge
 from .matching import instantiate, match
 from .model import MathNode, Path

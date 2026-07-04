@@ -34,7 +34,8 @@ from egglog import (
 )
 from egglog import StringLike
 
-from .catalogue import CATALOGUE, Rule
+from .catalogue import CATALOGUE
+from .rule import Rule
 from .model import MathNode
 
 

@@ -17,7 +17,8 @@ from __future__ import annotations
 from time import perf_counter
 
 from .audit import audit_catalogue
-from .catalogue import BY_ID, CATALOGUE, ruleset_from_json
+from .catalogue import BY_ID, CATALOGUE
+from .rule import ruleset_from_json
 from .conditions import Assumption
 from .model import (
     MathNode, ac_normalize, distance, from_json, num, pretty, subst_var, succ, to_json, var,

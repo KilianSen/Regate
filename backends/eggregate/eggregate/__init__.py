@@ -8,7 +8,8 @@ from .model import (
     MathNode, add, ac_normalize, distance, eq, frac, from_json, mul, neg, num,
     pretty, sub, to_json, var,
 )
-from .catalogue import CATALOGUE, Rule, rules
+from .catalogue import CATALOGUE, rules
+from .rule import Rule
 from .conditions import Assumption, SideCondition, discharge
 from .matching import instantiate, match
 from .backend import EGraphView, equivalent, grade, build_ruleset
