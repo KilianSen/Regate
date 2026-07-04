@@ -1,6 +1,6 @@
 {
   "name": "22-induction-empty-submission",
-  "note": "Regression: an induction exercise with an EMPTY submission must NOT be certified. Leanregate grades the student's base+step derivations (lean_check.check_induction); a missing proof is invalid_derivation/0, never proven_equal. This holds with or without the Lean toolchain (the submission check is symbolic and runs before the Lean backstop), so the Lean-free conformance harness exercises it.",
+  "note": "Regression: an induction exercise with an EMPTY (unattempted) submission must NOT be certified — AND must NOT be a false zero. A missing proof is *not attempted*, not *wrong*: leanregate grades the student's base+step derivations (lean_check.check_induction), and an absent derivation returns `unknown`/null (route to review) — never `proven_equal` (no false certification) and never `invalid_derivation`/0 (no confident zero on a possibly-true theorem). This holds with or without the Lean toolchain (the submission check is symbolic and runs before the Lean backstop), so the Lean-free conformance harness exercises it.",
   "request": {
     "protocol": "1.0",
     "exercise": {
@@ -133,8 +133,8 @@
   },
   "expect": {
     "leanregate": {
-      "outcome": "invalid_derivation",
-      "score": 0
+      "outcome": "unknown",
+      "score": null
     }
   }
 }

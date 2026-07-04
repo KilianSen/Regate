@@ -16,7 +16,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 COPY backends/coqregate/grade.py backends/coqregate/coq_induction.py \
-     backends/coqregate/coq_prover.py ./
+     backends/coqregate/coq_prover.py backends/coqregate/step_check.py ./
 COPY GRADING_PROTOCOL.md ./
 
 EXPOSE 8000

@@ -5,6 +5,7 @@ import os
 from dataclasses import dataclass
 
 import cvc5_prover
+import step_check  # strict symbolic rule-instance checking of the student's steps
 
 THEOREM_VAR = "n"   # cosmetic; the actual induction var name comes from the request
 
@@ -396,3 +397,73 @@ def certify(ex: dict) -> CertifyResult:
 def _store(key: str, result: CertifyResult) -> CertifyResult:
     _CACHE[key] = result
     return result
+
+
+# ---------------------------------------------------------------------------
+# Grading the STUDENT's derivation strictly (rule-instance, NOT value-equivalence).
+#
+# Each step must be an instance of the *claimed rule* at the *claimed path*
+# producing exactly the claimed result (step_check); each Type-B step must
+# substitute exactly the inductive hypothesis. No value-equivalence leniency — a
+# step that reaches a value-equal state by any other means than the claimed rule
+# is rejected. SMT cannot enforce this (it proves any arithmetic-true equality,
+# regardless of the claimed rule), so the rule-instance check is symbolic. Both
+# obligations must reduce to a reflexive `t = t`; cvc5 then BACKSTOPS the leap by
+# certifying the goal. Invalid step ⇒ `invalid`; an unknown/guarded rule, or a
+# goal cvc5 cannot certify ⇒ `uncertifiable` (→ unknown); a missing/half-empty
+# submission ⇒ `unattempted` (→ unknown) — never an auto-pass.
+# ---------------------------------------------------------------------------
+@dataclass
+class GradeResult:
+    status: str      # "certified" | "invalid" | "unattempted" | "uncertifiable" | "untranslatable" | "unavailable"
+    reason: str = ""
+
+
+def grade_derivation(ex: dict, sub: dict) -> GradeResult:
+    goal = ex.get("goal")
+    var = ex.get("inductionVar")
+    if not goal or goal.get("type") != "eq" or not var:
+        return GradeResult("untranslatable",
+                           "derivation grading needs an equality goal with an inductionVar")
+    var = str(var)
+    base_steps = (sub.get("base") or {}).get("steps")
+    step_steps = (sub.get("step") or {}).get("steps")
+    if not base_steps or not step_steps:
+        return GradeResult("unattempted",
+                           "no induction derivation submitted (need both a base-case and an "
+                           "inductive-step derivation)")
+
+    rules = step_check.build_rules(ex)
+    ac = step_check.ac_ops(ex)   # () unless exercise.options.ac_normalization
+    base0 = step_check.substitute(goal, var, {"type": "number", "value": "0"})
+    base = step_check.check_case(base0, base_steps, rules, ih=None, ac=ac)
+    if base.status == "invalid":
+        return GradeResult("invalid", f"base case: {base.reason}")
+    if base.status != "certified":
+        return GradeResult("uncertifiable", f"base case: {base.reason}")
+    if not step_check.is_reflexive(base.final, ac):
+        return GradeResult("invalid", "base case did not reduce both sides to a common form (t = t)")
+    succ = {"type": "succ", "slots": {"inner": [{"type": "variable", "value": var}]}}
+    step0 = step_check.substitute(goal, var, succ)
+    ih = (goal["slots"]["left"][0], goal["slots"]["right"][0])
+    stp = step_check.check_case(step0, step_steps, rules, ih=ih, ac=ac)
+    if stp.status == "invalid":
+        return GradeResult("invalid", f"inductive step: {stp.reason}")
+    if stp.status != "certified":
+        return GradeResult("uncertifiable", f"inductive step: {stp.reason}")
+    if not step_check.is_reflexive(stp.final, ac):
+        return GradeResult("invalid", "inductive step did not reduce both sides to a common form (t = t)")
+
+    # Every student step is a valid rule-instance and both obligations close. cvc5
+    # backstops the induction leap by certifying the goal (disprove-first, then prove).
+    if not cvc5_prover.cvc5_available():
+        return GradeResult("uncertifiable",
+                           "derivation steps are valid but cvc5 is unavailable to certify "
+                           "the induction leap")
+    cert = certify(ex)
+    if cert.certified:
+        return GradeResult("certified",
+                           "every step is the claimed rule applied correctly, and cvc5 certifies "
+                           "the induction")
+    return GradeResult("uncertifiable",
+                       f"derivation steps are valid but cvc5 did not certify the goal ({cert.method})")

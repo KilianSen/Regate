@@ -156,19 +156,64 @@ def test_certify_caches_by_source():
     assert len(fake.calls) == 1                       # checked once, reused
 
 
-# --- grade.py wiring --------------------------------------------------------
+# --- grade.py wiring: STRICT rule-instance grading (symbolic) + kernel backstop -
+# A real valid proof of `1ⁿ = 1`: pow_zero closes the base; pow_succ + the IH +
+# mul_one_left close the step. The rules are matched against the transmitted
+# ruleset (mul_one_left) + definitions (pow_zero/pow_succ).
+GOAL_1N = eq(powr(num(1), vr("n")), num(1))
+RULESET = [{"id": "mul_one_left", "lhs": mul(num(1), wd("a")), "rhs": wd("a"),
+            "bidirectional": False, "conditions": []}]
+VALID_BASE = [{"rule": "pow_zero", "path": [0], "result": eq(num(1), num(1))}]
+VALID_STEP = [
+    {"rule": "pow_succ", "path": [0], "result": eq(mul(num(1), powr(num(1), vr("n"))), num(1))},
+    {"kind": "B", "path": [0, 1], "equation": [powr(num(1), vr("n")), num(1)],
+     "result": eq(mul(num(1), num(1)), num(1))},
+    {"rule": "mul_one_left", "path": [0], "result": eq(num(1), num(1))},
+]
+
+
+def _sub(base, step):
+    return {"base": {"steps": [dict(s) for s in base]},
+            "step": {"steps": [dict(s) for s in step]}}
+
+
+def _ind_req(submission, ruleset=RULESET):
+    e = ex(GOAL_1N)
+    if ruleset is not None:
+        e["ruleset"] = ruleset
+    return {"protocol": "1.0", "exercise": e, "submission": submission}
+
+
 def test_grade_induction_certified():
-    _install(lambda src: True)
-    req = {"protocol": "1.0", "exercise": ex(eq(powr(num(1), vr("n")), num(1)))}
-    resp = grade.grade(req)
+    _install(lambda src: True)                         # kernel backstop certifies the goal
+    resp = grade.grade(_ind_req(_sub(VALID_BASE, VALID_STEP)))
     assert resp["outcome"] == "proven_equal" and resp["certified"] and resp["score"] == 100
-    assert resp["meta"]["induction"]["method"] == "induction"
+    assert resp["meta"]["induction"]["status"] == "certified"
 
 
-def test_grade_induction_unknown_when_rejected():
-    _install(lambda src: False)
-    req = {"protocol": "1.0", "exercise": ex(eq(powr(num(1), vr("n")), num(1)))}
-    resp = grade.grade(req)
+def test_grade_induction_invalid_wrong_result():
+    _install(lambda src: True)                         # symbolic check rejects before the backstop
+    bad = [dict(VALID_BASE[0], result=eq(num(1), num(2)))]   # pow_zero gives 1=1, not 1=2
+    resp = grade.grade(_ind_req(_sub(bad, VALID_STEP)))
+    assert resp["outcome"] == "invalid_derivation" and resp["score"] == 0 and not resp["certified"]
+
+
+def test_grade_induction_invalid_wrong_rule():
+    _install(lambda src: True)
+    bad = [dict(VALID_BASE[0], rule="pow_succ")]        # pow_succ does not match pow(1,0) — strict
+    resp = grade.grade(_ind_req(_sub(bad, VALID_STEP)))
+    assert resp["outcome"] == "invalid_derivation" and resp["score"] == 0
+
+
+def test_grade_induction_unknown_when_unattempted():
+    _install(lambda src: True)                         # no submission -> never an auto-pass
+    resp = grade.grade({"protocol": "1.0", "exercise": ex(GOAL_1N)})
+    assert resp["outcome"] == "unknown" and resp["score"] is None and not resp["certified"]
+
+
+def test_grade_induction_unknown_when_backstop_rejects():
+    _install(lambda src: False)                        # steps valid, but the kernel won't certify the goal
+    resp = grade.grade(_ind_req(_sub(VALID_BASE, VALID_STEP)))
     assert resp["outcome"] == "unknown" and resp["score"] is None and not resp["certified"]
 
 
@@ -176,9 +221,20 @@ def test_grade_induction_unknown_when_unavailable():
     coq_prover._CACHE.clear()
     coq_induction._CACHE.clear()
     coq_prover.coq_available = lambda: False         # type: ignore[assignment]
-    req = {"protocol": "1.0", "exercise": ex(eq(powr(num(1), vr("n")), num(1)))}
-    resp = grade.grade(req)
+    resp = grade.grade(_ind_req(_sub(VALID_BASE, VALID_STEP)))
     assert resp["outcome"] == "unknown" and resp["score"] is None
+
+
+def test_ac_matching_commutative():
+    # `mul_one_left` is `1·a → a`; applied to `x·1` (the 1 on the *other* side) it
+    # only matches modulo commutativity. AC off ⇒ no match (invalid); AC on ⇒ closes.
+    import step_check as sc
+    rules = {"mul_one_left": sc.Rule("mul_one_left", mul(num(1), wd("a")), wd("a"))}
+    src = eq(mul(vr("x"), num(1)), vr("x"))                       # x·1 = x
+    step = {"rule": "mul_one_left", "path": [0], "result": eq(vr("x"), vr("x"))}
+    assert sc.check_case(src, [step], rules, ih=None, ac=()).status == "invalid"
+    rep = sc.check_case(src, [step], rules, ih=None, ac=("add", "mul"))
+    assert rep.status == "certified" and sc.is_reflexive(rep.final, ("add", "mul"))
 
 
 def test_grade_non_induction_out_of_scope():

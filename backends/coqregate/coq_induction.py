@@ -5,6 +5,7 @@ import hashlib
 from dataclasses import dataclass
 
 import coq_prover  # reuse the kernel seam: check_source, coq_available, caching
+import step_check  # strict symbolic rule-instance checking of the student's steps
 
 FUN = "pw"           # the Coq name for the model's `pow` node
 THEOREM = "regate_induction"
@@ -242,3 +243,75 @@ def certify(ex: dict) -> CertifyResult:
     result = CertifyResult(True, "induction") if ok else CertifyResult(False, "rejected", detail)
     _CACHE[key] = result
     return result
+
+
+# ---------------------------------------------------------------------------
+# Grading the STUDENT's derivation strictly (rule-instance, NOT value-equivalence).
+#
+# Each step must be an instance of the *claimed rule* at the *claimed path*
+# producing exactly the claimed result (step_check); each Type-B step must
+# substitute exactly the inductive hypothesis. A step that reaches a value-equal
+# state by any other means than the claimed rule is rejected — no leniency. Both
+# obligations must reduce to a reflexive `t = t`. The Coq kernel then BACKSTOPS
+# the leap: it certifies the goal (guarding against unsound transmitted
+# definitions), so a derivation of valid rule-instances that closes both
+# obligations certifies ∀n.P(n). Invalid step ⇒ `invalid`; an unknown/guarded
+# rule, or a goal the kernel cannot certify ⇒ `uncertifiable` (→ unknown); a
+# missing/half-empty submission ⇒ `unattempted` (→ unknown) — never an auto-pass.
+# ---------------------------------------------------------------------------
+@dataclass
+class GradeResult:
+    status: str      # "certified" | "invalid" | "unattempted" | "uncertifiable" | "untranslatable" | "unavailable"
+    reason: str = ""
+
+
+def grade_derivation(ex: dict, sub: dict) -> GradeResult:
+    goal = ex.get("goal")
+    var = ex.get("inductionVar")
+    if not goal or goal.get("type") != "eq" or not var:
+        return GradeResult("untranslatable", "goal must be an equality with an inductionVar")
+    var = str(var)
+    base_steps = (sub.get("base") or {}).get("steps")
+    step_steps = (sub.get("step") or {}).get("steps")
+    if not base_steps or not step_steps:
+        return GradeResult("unattempted",
+                           "no induction derivation submitted (need both a base-case and an "
+                           "inductive-step derivation)")
+
+    rules = step_check.build_rules(ex)
+    ac = step_check.ac_ops(ex)   # () unless exercise.options.ac_normalization
+    # Base: reduce P(0) to a tautology using the claimed rules only.
+    base0 = step_check.substitute(goal, var, {"type": "number", "value": "0"})
+    base = step_check.check_case(base0, base_steps, rules, ih=None, ac=ac)
+    if base.status == "invalid":
+        return GradeResult("invalid", f"base case: {base.reason}")
+    if base.status != "certified":
+        return GradeResult("uncertifiable", f"base case: {base.reason}")
+    if not step_check.is_reflexive(base.final, ac):
+        return GradeResult("invalid", "base case did not reduce both sides to a common form (t = t)")
+    # Step: reduce P(S n) to a tautology, licensed to substitute the IH P(n).
+    succ = {"type": "succ", "slots": {"inner": [{"type": "variable", "value": var}]}}
+    step0 = step_check.substitute(goal, var, succ)
+    ih = (goal["slots"]["left"][0], goal["slots"]["right"][0])
+    stp = step_check.check_case(step0, step_steps, rules, ih=ih, ac=ac)
+    if stp.status == "invalid":
+        return GradeResult("invalid", f"inductive step: {stp.reason}")
+    if stp.status != "certified":
+        return GradeResult("uncertifiable", f"inductive step: {stp.reason}")
+    if not step_check.is_reflexive(stp.final, ac):
+        return GradeResult("invalid", "inductive step did not reduce both sides to a common form (t = t)")
+
+    # Every student step is a valid rule-instance and both obligations close. The
+    # Coq kernel backstops the induction leap (and guards the definitions).
+    if not coq_prover.coq_available():
+        return GradeResult("uncertifiable",
+                           "derivation steps are valid but the Coq kernel is unavailable to "
+                           "certify the induction leap")
+    cert = certify(ex)
+    if cert.certified:
+        return GradeResult("certified",
+                           "every step is the claimed rule applied correctly, and the Coq kernel "
+                           "certifies the induction")
+    return GradeResult("uncertifiable",
+                       f"derivation steps are valid but the Coq backstop did not certify the goal "
+                       f"({cert.method})")

@@ -155,21 +155,84 @@ def test_require_recheck_downgrades_unrechecked_unsat():
         cvc5_induction.REQUIRE_RECHECK = False
 
 
-# --- grade.py wiring ---------------------------------------------------------
+# --- grade.py wiring: STRICT rule-instance grading (symbolic) + cvc5 backstop --
+# A real valid proof of `1ⁿ = 1`: pow_zero closes the base; pow_succ + the IH +
+# mul_one_left close the step. Rules are matched against the transmitted ruleset
+# (mul_one_left) + definitions (pow_zero/pow_succ). cvc5 only backstops the leap.
+RULESET = [{"id": "mul_one_left", "lhs": mul(num(1), wd("a")), "rhs": wd("a"),
+            "bidirectional": False, "conditions": []}]
+VALID_BASE = [{"rule": "pow_zero", "path": [0], "result": eq(num(1), num(1))}]
+VALID_STEP = [
+    {"rule": "pow_succ", "path": [0], "result": eq(mul(num(1), powr(num(1), vr("n"))), num(1))},
+    {"kind": "B", "path": [0, 1], "equation": [powr(num(1), vr("n")), num(1)],
+     "result": eq(mul(num(1), num(1)), num(1))},
+    {"rule": "mul_one_left", "path": [0], "result": eq(num(1), num(1))},
+]
+
+
+def _sub(base, step):
+    return {"base": {"steps": [dict(s) for s in base]},
+            "step": {"steps": [dict(s) for s in step]}}
+
+
+def _ind_req(submission, ruleset=RULESET):
+    e = {**POW_GOAL, "ruleset": ruleset} if ruleset is not None else POW_GOAL
+    return {"protocol": "1.0", "exercise": e, "submission": submission}
+
+
 def test_grade_induction_certified():
+    # backstop: disprove (fmf) not-sat, prove (quant-ind) unsat -> certified
     _install(lambda s, a: ("unknown", "") if "--fmf-fun" in a else ("unsat", ""))
-    resp = grade.grade({"protocol": "1.0", "exercise": POW_GOAL})
+    resp = grade.grade(_ind_req(_sub(VALID_BASE, VALID_STEP)))
     assert resp["outcome"] == "proven_equal" and resp["certified"] and resp["score"] == 100
     assert resp["proof"] and resp["proof"][0]["engine"] == "cvc5"
 
 
-def test_grade_induction_disproved_carries_witness():
+def test_grade_induction_invalid_wrong_result():
+    _install(lambda s, a: ("unsat", ""))            # symbolic rejects before any backstop
+    bad = [dict(VALID_BASE[0], result=eq(num(1), num(2)))]   # pow_zero gives 1=1, not 1=2
+    resp = grade.grade(_ind_req(_sub(bad, VALID_STEP)))
+    assert resp["outcome"] == "invalid_derivation" and resp["score"] == 0 and not resp["certified"]
+
+
+def test_grade_induction_invalid_wrong_rule():
+    _install(lambda s, a: ("unsat", ""))
+    bad = [dict(VALID_BASE[0], rule="pow_succ")]     # pow_succ does not match pow(1,0) — strict
+    resp = grade.grade(_ind_req(_sub(bad, VALID_STEP)))
+    assert resp["outcome"] == "invalid_derivation" and resp["score"] == 0
+
+
+def test_grade_induction_unknown_when_unattempted():
+    _install(lambda s, a: ("unsat", ""))            # no submission -> never an auto-pass
+    resp = grade.grade({"protocol": "1.0", "exercise": POW_GOAL})
+    assert resp["outcome"] == "unknown" and resp["score"] is None and not resp["certified"]
+
+
+def test_grade_induction_unknown_when_backstop_fails():
+    _install(lambda s, a: ("unknown", "timeout"))   # steps valid, but cvc5 can't certify the goal
+    resp = grade.grade(_ind_req(_sub(VALID_BASE, VALID_STEP)))
+    assert resp["outcome"] == "unknown" and resp["score"] is None
+
+
+def test_certify_disproves_with_witness():
+    # The disprove path stays on the certify() oracle: a false goal -> a witness.
     def respond(s, a):
         return ("sat", "sat\n(((val n) 2))") if "--fmf-fun" in a else ("unsat", "")
     _install(respond)
-    resp = grade.grade({"protocol": "1.0", "exercise": POW_GOAL})
-    assert resp["outcome"] == "proven_unequal" and resp["score"] == 0
-    assert resp["witness"] == {"n": "2"}
+    res = cvc5_induction.certify(POW_GOAL)
+    assert res.outcome == "proven_unequal" and res.witness == {"n": "2"}
+
+
+def test_ac_matching_commutative():
+    # `mul_one_left` is `1·a → a`; applied to `x·1` it matches only modulo
+    # commutativity. AC off ⇒ no match (invalid); AC on ⇒ closes.
+    import step_check as sc
+    rules = {"mul_one_left": sc.Rule("mul_one_left", mul(num(1), wd("a")), wd("a"))}
+    src = eq(mul(vr("x"), num(1)), vr("x"))                       # x·1 = x
+    step = {"rule": "mul_one_left", "path": [0], "result": eq(vr("x"), vr("x"))}
+    assert sc.check_case(src, [step], rules, ih=None, ac=()).status == "invalid"
+    rep = sc.check_case(src, [step], rules, ih=None, ac=("add", "mul"))
+    assert rep.status == "certified" and sc.is_reflexive(rep.final, ("add", "mul"))
 
 
 def test_grade_non_induction_is_unknown():

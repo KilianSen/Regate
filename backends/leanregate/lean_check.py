@@ -316,9 +316,14 @@ def check_induction(ex: dict, sub: dict,
     base_steps = (sub.get("base") or {}).get("steps")
     step_steps = (sub.get("step") or {}).get("steps")
     if not base_steps or not step_steps:
-        return InductionReport("invalid",
-                               "incomplete induction proof: both a base-case and an "
-                               "inductive-step derivation are required")
+        # No (complete) derivation was submitted — the student has not *attempted*
+        # the obligations. That is not the same as a *wrong* proof: an absent
+        # derivation must never be scored `invalid_derivation`/0 (a false zero on a
+        # possibly-true theorem). Report it as uncertifiable so grade.py routes it
+        # to `unknown` (route to review), honoring "never a false grade".
+        return InductionReport("uncertifiable",
+                               "no induction derivation submitted: both a base-case and an "
+                               "inductive-step derivation are required to grade the proof")
 
     rules = induction_rules(ex, proven or {})
     base_goal = substitute(goal, var, _num(0))

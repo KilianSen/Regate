@@ -30,27 +30,34 @@ def grade(request: dict) -> dict:
         raise RequestError(f"unsupported protocol {request.get('protocol')!r}")
     ex = request.get("exercise") or {}
 
-    # Induction is exactly where a formal backend earns its keep. We translate
-    # the goal + its recursive definitions into Coq, emit an `induction n` proof,
-    # and kernel-check it. Only a kernel-accepted proof is certified — an
-    # untranslatable goal, a rejected proof, or a missing toolchain returns
-    # `unknown`, never a false grade.
+    # Induction is exactly where a formal backend earns its keep. We GRADE THE
+    # STUDENT'S derivation, not just the bare theorem: each submitted step becomes
+    # a Coq-checked equality (the inductive step under the IH). A fabricated step
+    # is `invalid_derivation`; both obligations reducing to `t = t` certify the
+    # induction. A missing/half-empty submission is `unknown` (route to review) —
+    # never an auto-pass on a true theorem the student did not prove. (The bare
+    # theorem certifier, `coq_induction.certify`, remains for the authoring-time
+    # "is this exercise certifiable?" oracle, but never stands in as a grade.)
     if ex.get("mode") == "induction":
-        res = coq_induction.certify(ex)
+        sub = request.get("submission") or {}
+        res = coq_induction.grade_derivation(ex, sub)
         meta = {"induction": {"var": ex.get("inductionVar"),
-                              "method": res.method, "detail": res.detail}}
-        if res.certified:
+                              "status": res.status, "reason": res.reason}}
+        if res.status == "certified":
             return _envelope("proven_equal", 100, True, meta=meta,
-                             feedback="Certified: ∀n. P(n) verified by Coq induction "
-                                      "(structural induction over ℕ, kernel-checked).")
+                             feedback="Certified: every step of your base case and inductive "
+                                      "step is Coq-checked; ∀n. P(n) follows by induction.")
+        if res.status == "invalid":
+            return _envelope("invalid_derivation", 0, False, meta=meta,
+                             feedback=f"Invalid induction proof: {res.reason}.")
         reason = {
+            "unattempted": "no derivation submitted to grade",
             "unavailable": "the Coq toolchain is unavailable in this deployment",
-            "untranslatable": f"the goal is outside the certifiable fragment ({res.detail})",
-            "rejected": "Coq could not confirm the inductive claim",
-        }.get(res.method, res.detail)
+            "untranslatable": f"the goal is outside the gradeable fragment ({res.reason})",
+        }.get(res.status, res.reason)
         return _envelope("unknown", None, False, meta=meta,
-                         feedback=f"Coqregate did not certify the induction: {reason}. "
-                                  f"Route to review or use the Eggregate backend.")
+                         feedback=f"Coqregate could not grade this induction: {reason}. "
+                                  f"Route to review.")
 
     # Coqregate is an induction specialist; everything else is out of scope.
     if "source" not in ex and ex.get("goal") is None:

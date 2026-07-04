@@ -30,7 +30,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 COPY backends/cvc5regate/grade.py backends/cvc5regate/cvc5_induction.py \
-     backends/cvc5regate/cvc5_prover.py ./
+     backends/cvc5regate/cvc5_prover.py backends/cvc5regate/step_check.py ./
 COPY GRADING_PROTOCOL.md ./
 
 EXPOSE 8000

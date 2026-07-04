@@ -31,7 +31,7 @@ def grade(request: dict) -> dict:
     ex = request.get("exercise") or {}
 
     if ex.get("mode") == "induction":
-        return _grade_induction(ex)
+        return _grade_induction(ex, request.get("submission") or {})
 
     # cvc5regate is an induction certifier. Equational derivations / endpoint
     # equivalence are graded by eggregate (e-graph) or leanregate (formal); this
@@ -44,41 +44,38 @@ def grade(request: dict) -> dict:
                               "eggregate or leanregate backend, or route to review.")
 
 
-def _grade_induction(ex: dict) -> dict:
+def _grade_induction(ex: dict, sub: dict) -> dict:
+    # GRADE THE STUDENT'S derivation, not just the bare theorem: each submitted
+    # step becomes an SMT validity query (the inductive step under the IH). A
+    # value-changing step is `sat` → invalid_derivation; both obligations reducing
+    # to `t = t` certify the induction. A missing/half-empty submission, or a step
+    # cvc5 cannot decide, is `unknown` (route to review) — never an auto-pass on a
+    # true theorem the student did not prove. (The bare theorem certifier +
+    # disprove witness, `cvc5_induction.certify`, remains for the authoring-time
+    # "is this exercise certifiable?" oracle, but never stands in as a grade.)
     if not ex.get("goal"):
         raise RequestError("induction mode requires exercise.goal")
     if not ex.get("inductionVar"):
         raise RequestError("induction mode requires exercise.inductionVar")
 
-    res = cvc5_induction.certify(ex)
-    meta = {"induction": {"var": ex.get("inductionVar"), "method": res.method,
-                          "engine": "cvc5", "detail": res.detail}}
-
-    if res.outcome == "proven_equal":
-        # The certificate: cvc5's verdict (re-checked by Carcara when an Alethe
-        # proof is exportable). The proof field carries the machine-checkable goal
-        # + engine so the verdict is reproducible.
-        meta["induction"]["rechecked"] = (res.method == "alethe+carcara")
+    res = cvc5_induction.grade_derivation(ex, sub)
+    meta = {"induction": {"var": ex.get("inductionVar"), "engine": "cvc5",
+                          "status": res.status, "reason": res.reason}}
+    if res.status == "certified":
         return _envelope("proven_equal", 100, True, meta=meta,
-                         proof=[{"engine": "cvc5", "method": res.method,
+                         proof=[{"engine": "cvc5", "method": "step-validity",
                                  "goal": ex.get("goal"), "inductionVar": ex.get("inductionVar")}],
-                         feedback="Certified: cvc5 proved ∀n. P(n) by structural induction"
-                                  + (" (independently re-checked by Carcara)."
-                                     if res.method == "alethe+carcara" else "."))
-    if res.outcome == "proven_unequal":
-        return _envelope("proven_unequal", 0, False, witness=res.witness, meta=meta,
-                         feedback=f"Disproved: cvc5 found a counterexample {res.witness}.")
-    if res.outcome == "equal_no_certificate":
-        return _envelope("equal_no_certificate", None, False, meta=meta,
-                         feedback="cvc5 proved the goal but no independently re-checked "
-                                  "certificate is available; route to review.")
-    # unknown: outside the fragment, timeout, refuted-without-witness, or no cvc5.
-    reason = {"unavailable": "the cvc5 toolchain is unavailable in this deployment",
-              "untranslatable": f"the goal is outside the supported fragment ({res.detail})",
-              "rejected": "cvc5 did not settle the goal within the time budget"}.get(
-                  res.method, res.detail)
+                         feedback="Certified: every step of your base case and inductive step is "
+                                  "SMT-checked; ∀n. P(n) follows by induction.")
+    if res.status == "invalid":
+        return _envelope("invalid_derivation", 0, False, meta=meta,
+                         feedback=f"Invalid induction proof: {res.reason}.")
+    reason = {"unattempted": "no derivation submitted to grade",
+              "unavailable": "the cvc5 toolchain is unavailable in this deployment",
+              "untranslatable": f"the goal is outside the gradeable fragment ({res.reason})"}.get(
+                  res.status, res.reason)
     return _envelope("unknown", None, False, meta=meta,
-                     feedback=f"cvc5regate could not certify this induction: {reason}. "
+                     feedback=f"cvc5regate could not grade this induction: {reason}. "
                               "Route to review.")
 
 
