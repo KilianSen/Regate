@@ -53,8 +53,9 @@ wheel**; the patched 3.15t build was for experiments only.
 
 Eggregate implements a language-agnostic grading contract,
 **[`GRADING_PROTOCOL.md`](../../GRADING_PROTOCOL.md)** (`GradeRequest` → `GradeResponse`,
-MathNode JSON). Artemis integrates against that contract once and runs this backend
-as a self-contained, pluggable container, selected per exercise.
+MathNode JSON). A host learning platform integrates against that contract once and
+runs this backend as a self-contained, pluggable container, selected per exercise.
+(Artemis is the reference adopter; nothing here depends on it.)
 
 ```sh
 docker build -t eggregate .
@@ -227,7 +228,7 @@ table, and reproducible numbers in **[`SCALING.md`](docs/SCALING.md)** (run
 Soundness is *empirical, not formal* (random testing, not a verified rule
 library); proving is *incomplete both ways* (bounded/forward-only); the egg
 backend is *our reimplementation, lightly tested*; scope is *school algebra
-only*; and it is *not integrated with Artemis*. Full, tagged breakdown
+only*; and it is *not yet wired into a production host*. Full, tagged breakdown
 (deliberate scope vs. immaturity vs. method limits) in
 **[`LIMITATIONS.md`](docs/LIMITATIONS.md)**.
 

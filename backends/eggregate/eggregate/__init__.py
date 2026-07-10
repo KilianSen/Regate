@@ -1,8 +1,11 @@
-"""Eggregate -- an e-graph reasoning backend (MS3) for the Artemis equational
-reasoning exercise type, built on egglog equality saturation.
+"""Eggregate -- a pluggable e-graph reasoning backend for grading equational
+reasoning in learning platforms, built on egglog equality saturation.
 
-See the bachelor's thesis "Extending Artemis with proof based mathematical
-exercises" (main.pdf), Section 4.5 / 5.7 and Appendix B.
+It speaks the language-agnostic grading contract (GRADING_PROTOCOL.md), so any
+host platform integrates against the contract, not this package. Originated as a
+bachelor's thesis extending Artemis ("Extending Artemis with proof based
+mathematical exercises", Section 4.5 / 5.7 and Appendix B); Artemis is the
+reference adopter, not a dependency.
 """
 from .model import (
     MathNode, add, ac_normalize, distance, eq, frac, from_json, mul, neg, num,

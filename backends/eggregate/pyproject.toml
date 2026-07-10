@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "eggregate"
 version = "0.1.0"
-description = "e-graph reasoning grading backend for Artemis equational-reasoning exercises"
+description = "pluggable e-graph reasoning backend for grading equational reasoning in learning platforms"
 requires-python = ">=3.11"
 dependencies = ["egglog==13.2.0"]
 

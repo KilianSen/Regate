@@ -1,10 +1,12 @@
 # Coqregate
 
-A grading backend for Artemis equational-reasoning exercises. It implements the
-language-agnostic grading contract **[`GRADING_PROTOCOL.md`](../../GRADING_PROTOCOL.md)**
-(`GradeRequest` → `GradeResponse`, MathNode JSON, CLI + HTTP transports), so
-Artemis integrates against that contract once and runs this backend as a
-self-contained, pluggable container, selected per exercise.
+A pluggable grading backend for equational-reasoning exercises in learning
+platforms. It implements the language-agnostic grading contract
+**[`GRADING_PROTOCOL.md`](../../GRADING_PROTOCOL.md)** (`GradeRequest` →
+`GradeResponse`, MathNode JSON, CLI + HTTP transports), so a host platform
+integrates against that contract once and runs this backend as a self-contained
+container, selected per exercise. (Artemis is the reference adopter; nothing here
+depends on it.)
 
 Coqregate is a **specialist certifier** for proofs by **induction over ℕ**
 (`mode: "induction"`), built on **Rocq (Coq)**. Coq's `ring`/`field`/`lia`/`nia`

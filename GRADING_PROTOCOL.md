@@ -1,17 +1,17 @@
 # Equational-reasoning grading protocol (v1)
 
 A language-agnostic JSON contract for grading a student's equational-reasoning
-submission. Any backend that speaks it is a drop-in grader for Artemis; today
-**eggregate** (Python / e-graph), **leanregate** (Lean / formal), **coqregate**
-(Rocq/Coq, induction only) and **cvc5regate** (cvc5 SMT, induction only) all
-implement it, so they can be deployed as interchangeable OCI containers and
-selected per exercise. The two induction certifiers answer non-induction modes
+submission. Any backend that speaks it is a drop-in grader for a host learning
+platform; today **eggregate** (Python / e-graph), **leanregate** (Lean / formal),
+**coqregate** (Rocq/Coq, induction only) and **cvc5regate** (cvc5 SMT, induction
+only) all implement it, so they can be deployed as interchangeable OCI containers
+and selected per exercise. The two induction certifiers answer non-induction modes
 with `unknown` (out of scope), so "interchangeable" holds within a mode.
 
 Transport is deliberately unspecified — a conforming backend exposes **both**:
 
 - **CLI**: read a `GradeRequest` JSON on stdin, write a `GradeResponse` JSON on
-  stdout, exit 0. (Suits per-submission OCI runs, like Artemis test containers.)
+  stdout, exit 0. (Suits per-submission runs in a container/test runner.)
 - **HTTP**: `POST /grade` with a `GradeRequest` body → `GradeResponse`; `GET
   /health` → `{"status":"ok","backend":..,"protocol":"1.0"}`. (Suits a
   long-running service.)
@@ -20,9 +20,11 @@ Same handler behind both, so the choice is a deploy-time decision.
 
 ## Expressions
 
-Expressions use the persisted **MathNode** JSON shape (Artemis
-`MathNodeConverter`): `{"type","value"?}` for `number`/`variable`, otherwise
-`{"type","slots":{name:[child], ...}}`. See `eggregate/model.py`
+Expressions use the **MathNode** JSON shape — a plain typed tree any host can
+produce (and deliberately compatible with the reference adopter's persisted
+format, Artemis's `MathNodeConverter`): `{"type","value"?}` for
+`number`/`variable`, otherwise `{"type","slots":{name:[child], ...}}`. See
+`eggregate/model.py`
 (`to_json`/`from_json`).
 
 ## GradeRequest
@@ -226,7 +228,7 @@ has, and it answers `unknown` for a rule it cannot prove regardless of
   measurable progress* toward the target form — it is **not** the same as
   `proven_unequal`, and a caller must not conflate them by reading `score` alone.
 - **`certified` distinguishes a checked proof from a bare yes.** `proven_equal`
-  must carry a `proof` that the backend (or Artemis) can re-verify; a backend
+  must carry a `proof` that the backend (or the host) can re-verify; a backend
   that can only assert equivalence returns `equal_no_certificate`. An *empty*
   `proof` (`[]`) is a valid zero-step certificate ("already the target form");
   `null` is not. The formal backends attach the engine artifact they ran — the

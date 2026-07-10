@@ -1,14 +1,24 @@
 # Regate
 
-A monorepo of **pluggable equational-reasoning grading backends** for the
-[Artemis](https://github.com/ls1intum/Artemis) learning platform — the MS3
-deliverable of the bachelor's thesis *Extending Artemis with proof-based
-mathematical exercises*.
+**Pluggable equational-reasoning grading backends for learning platforms.**
+Regate grades a student's algebraic derivation — a chain of rewrites, an
+equivalence, or a proof by induction — behind **one language-agnostic wire
+contract** ([`GRADING_PROTOCOL.md`](GRADING_PROTOCOL.md)). A host platform
+integrates against the contract *once* and picks a backend per exercise;
+backends are self-contained OCI containers with a CLI and an HTTP transport, so
+they drop into any container/test runner.
 
-Four backends grade the same exercises by different proof engines, behind **one
-wire contract** ([`GRADING_PROTOCOL.md`](GRADING_PROTOCOL.md)), so Artemis
-integrates once and picks a backend per exercise — deployed as interchangeable
-OCI containers via Artemis's OCI runtime.
+Four interchangeable backends grade the same exercises by different proof
+engines, from a fast e-graph to formal kernels — trade speed for the strength of
+the certificate without changing the integration. Rules and exercises belong to
+the **host**; Regate is the grader. See **[Integrating Regate](INTEGRATION.md)**
+for the plug-in guide.
+
+> **Origin.** Regate began as the MS3 deliverable of the bachelor's thesis
+> *Extending Artemis with proof-based mathematical exercises*.
+> [Artemis](https://github.com/ls1intum/Artemis) is the **reference adopter** —
+> the MathNode JSON is deliberately compatible with its persisted format — but
+> nothing here depends on Artemis, and the contract is platform-neutral.
 
 | Backend | Engine | Scope | Notes |
 |---|---|---|---|
@@ -51,6 +61,7 @@ production rule source, which is always the request.
 
 ```
 GRADING_PROTOCOL.md      # the canonical contract (single source of truth)
+INTEGRATION.md           # host-facing guide: plug Regate into a platform
 backends/
   eggregate/             # Python e-graph backend (package, tests, Dockerfile, docs/)
   leanregate/            # Lean formal backend (grade.py, lakefile, Dockerfile)

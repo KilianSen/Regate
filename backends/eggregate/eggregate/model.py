@@ -8,8 +8,10 @@ visiting slots in alphabetical order".  A fraction therefore exposes
 numerator -- so the inner sum ``x + 0`` of ``3*(x+0) / (3*1)`` lives at path
 ``[1, 1]`` (numerator, then the mul's right child), matching Appendix B.
 
-The same JSON shape (``{"type", "value"?, "slots"?}``) is what ``MathNodeConverter``
-persists in Artemis, so these trees round-trip with the real platform data.
+The JSON shape (``{"type", "value"?, "slots"?}``) is a plain typed-tree any host
+can produce; it is deliberately compatible with the format the reference adopter
+(Artemis, via its ``MathNodeConverter``) persists, so these trees round-trip with
+real platform data without binding the backend to any one platform.
 """
 from __future__ import annotations
 
