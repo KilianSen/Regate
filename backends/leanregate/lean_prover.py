@@ -3,7 +3,6 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import re
 import shutil
 import subprocess
 from dataclasses import dataclass, field
@@ -144,57 +143,6 @@ def _auto_source(rule: dict) -> str:
     )
 
 
-# A carried proof is an untrusted string spliced into the Lean file after
-# `theorem regate_rule … := by`. On its own that frame can only elaborate cleanly
-# by actually proving regate_rule. The escape is a proof that discharges the goal
-# with `sorry`/`admit` (Lean accepts it, only warning) and then opens a decoy
-# `theorem`/`example` it can prove, or hides one in a comment. `sorry` is the
-# critical one: unlike Coq's `admit`, it does not need an `Admitted` to close, so a
-# lone `sorry` would make a false rule 'proven'. Deny these tokens.
-_FORBIDDEN_LEAN = re.compile(
-    r"/-|--|"                                    # block / line comment
-    r"\b(?:sorry|admit|native_decide|"           # goal-closing escapes
-    r"theorem|lemma|example|def|abbrev|instance|axiom|constant|"
-    r"opaque|structure|inductive|class|macro|elab|syntax|notation|"
-    r"import|open|namespace|section|variable|set_option|attribute)\b",
-    re.IGNORECASE)
-
-
-def _sanitize_lean_tactic(proof: str) -> str:
-    """Reject a carried Lean proof that could break out of its theorem frame.
-
-    A legitimate rule proof is a tactic block (`ring`, `field_simp; ring`, …). A
-    `sorry`/`admit`, a new declaration, a comment, or an `import`/`open` is refused
-    so a carried proof can only discharge the stated rule, never smuggle a decoy
-    that makes an unsound rule 'proven'.
-    """
-    if _FORBIDDEN_LEAN.search(proof):
-        raise TranslationError("carried proof contains a disallowed command "
-                               "(only tactic blocks are accepted)")
-    return proof
-
-
-def _carried_source(rule: dict) -> str:
-    """A Lean file that states the rule and discharges it with the supplied proof.
-
-    Imports the tactic suite + ℚ defs rather than all of `import Mathlib`. This is
-    the SAME surface as the induction emitter, which lets the image
-    ship only the transitive olean closure of `Mathlib.Tactic` (see the Dockerfile's
-    prune step) instead of every Mathlib olean. A carried proof keeps the full
-    tactic suite (ring/field_simp/linarith/nlinarith/positivity/norm_num/omega/…);
-    the only thing it loses is citing a Mathlib *named theorem* by name, which the
-    ℚ rational-rewrite rules this path certifies do not need."""
-    sig, _ = _goal(rule)
-    proof = _sanitize_lean_tactic(rule["proof"]).rstrip("\n")
-    indented = "\n".join("  " + line for line in proof.splitlines())
-    return (
-        "import Mathlib.Tactic\n"
-        "import Mathlib.Data.Rat.Defs\n\n"
-        f"theorem {THEOREM} : {sig} := by\n"
-        f"{indented}\n"
-    )
-
-
 # ---------------------------------------------------------------------------
 # Lean invocation (the mock seam — the only thing that touches the toolchain).
 # ---------------------------------------------------------------------------
@@ -269,7 +217,7 @@ def _run_lean(body: str) -> tuple[bool, str]:
 class ProofResult:
     rule_id: str
     proven: bool
-    method: str        # "ring" | "proof" | "rejected" | "unavailable" | "untranslatable"
+    method: str        # "ring" | "rejected" | "unavailable" | "untranslatable"
     lemma: str         # the Lean theorem name when proven, else ""
     detail: str = ""   # Lean diagnostics when rejected
 
@@ -280,7 +228,7 @@ _CACHE: dict[str, ProofResult] = {}
 def _cache_key(rule: dict) -> str:
     # Content-addressed: same rule body ⇒ same proof outcome. Drop cosmetic id so
     # two ids for the same identity share a result.
-    canon = {k: rule.get(k) for k in ("lhs", "rhs", "conditions", "proof")}
+    canon = {k: rule.get(k) for k in ("lhs", "rhs", "conditions")}
     return hashlib.sha256(json.dumps(canon, sort_keys=True).encode()).hexdigest()
 
 
@@ -306,19 +254,9 @@ def prove_rule(rule: dict) -> ProofResult:
             return _store(key, ProofResult(rid, True, "ring", THEOREM))
         auto_detail = detail
 
-    # 2) proof-carrying fallback. A carried proof that is malformed or rejected by
-    #    the sanitizer establishes nothing — the rule is simply unproven (it already
-    #    failed auto-proof above), never crashes, and never trusted.
-    if rule.get("proof"):
-        try:
-            source = _carried_source(rule)
-        except TranslationError as e:
-            return _store(key, ProofResult(rid, False, "rejected", "", str(e)))
-        ok, detail = _run_lean(source)
-        if ok:
-            return _store(key, ProofResult(rid, True, "proof", THEOREM))
-        return _store(key, ProofResult(rid, False, "rejected", "", detail))
-
+    # A rule outside the automatic fragment is simply unproven. Regate does not run
+    # a caller-supplied proof script (an injection surface; rule soundness is the
+    # caller's upstream responsibility), so a `proof` field on the rule is ignored.
     return _store(key, ProofResult(rid, False, "rejected", "", auto_detail))
 
 

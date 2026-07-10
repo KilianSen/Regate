@@ -73,13 +73,19 @@ def test_auto_prove_rejects_unsound_rule():
     assert not r.proven and r.method == "rejected"
 
 
-def test_proof_carrying_fallback():
-    # auto-prove fails (relational rule), but a supplied proof checks out.
-    fake = _install(lambda body: "import Mathlib.Data.Rat.Defs" in body)  # only the carried file imports the Rat.Defs surface
+def test_relational_rule_outside_auto_fragment_is_unproven():
+    # A relational (`iff`) rule like eq_symm is outside what the automatic tactic
+    # (`ring`/`field_simp`) discharges. With carried proofs removed, leanregate
+    # cannot prove it and a supplied `proof` is ignored — so the rule is unproven
+    # (a step citing it grades `unknown`, never certified). This is the deliberate
+    # cost of not running caller-supplied proof scripts.
+    # `ring`/`field_simp` cannot close an `↔` goal, so the auto attempt fails.
+    fake = _install(lambda body: "↔" not in body)
     r = lean_prover.prove_rule({"id": "eq_symm", "lhs": _bin("eq", A, B),
                                 "rhs": _bin("eq", B, A), "bidirectional": True,
                                 "proof": "exact eq_comm"})
-    assert r.proven and r.method == "proof"
+    assert not r.proven and r.method == "rejected"
+    assert all("eq_comm" not in b for b in fake.calls)   # the proof was never elaborated
 
 
 def test_cache_dedupes_by_content():
@@ -138,22 +144,27 @@ def test_grade_unknown_when_lean_unavailable():
     assert resp["outcome"] == "unknown"
 
 
-def test_carried_proof_injection_is_refused():
-    # A carried Lean proof that closes the goal with `sorry`/`admit` and opens a
-    # decoy declaration must be refused before it reaches `lean` — else a false rule
-    # is 'proven'. `sorry` is the critical case: it needs no Admitted to close.
-    for p in ["sorry",
-              "admit",
-              "ring\ntheorem evil : (0:Q) = 1 := by sorry",
-              "ring\nexample : True := trivial",
-              "-- theorem sneak\nring",
-              "/- sorry -/ ring"]:
-        try:
-            lean_prover._sanitize_lean_tactic(p)
-            assert False, f"sanitizer let through: {p!r}"
-        except lean_prover.TranslationError:
-            pass
-    assert lean_prover._sanitize_lean_tactic("field_simp; ring") == "field_simp; ring"
+def test_carried_proof_field_is_ignored():
+    # Regate does not run a caller-supplied Lean proof (injection surface; rule
+    # soundness is the caller's upstream job). A `proof` on a rule must never be
+    # elaborated — the rule is proven only by the automatic tactic, or not at all.
+    calls = []
+
+    def fake_run(body):
+        calls.append(body)
+        return (True, "")            # kernel would accept anything it is handed
+
+    lean_prover.lean_available = lambda: True          # type: ignore[assignment]
+    lean_prover._run_lean = fake_run                   # type: ignore[assignment]
+    lean_prover._CACHE.clear()
+    rule = {"id": "r",
+            "lhs": {"type": "mul", "slots": {"left": [{"type": "number", "value": "1"}],
+                                             "right": [{"type": "wild", "value": "a"}]}},
+            "rhs": {"type": "wild", "value": "a"},
+            "proof": "sorry\ntheorem evil : (0:Q) = 1 := by sorry"}
+    res = lean_prover.prove_rule(rule)
+    assert res.method == "ring"                        # auto path, never "proof"
+    assert all("sorry" not in b and "evil" not in b for b in calls)   # payload never elaborated
 
 
 def _run_all():

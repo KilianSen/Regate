@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import copy
 import hashlib
-import re
 from dataclasses import dataclass
 
 import coq_prover  # reuse the kernel seam: check_source, coq_available, caching
@@ -223,14 +222,12 @@ def build_source(ex: dict) -> str:
 # (~0.35 s of coqc each, and the CLI transport runs cold in a per-submission
 # container).
 #
-# That warrant is only worth what enforces it, so it can be checked here:
-#
-#   * `options.verify_rules` re-establishes it from scratch — each rule gets its
-#     own Coq kernel run. Use it for rules from an untrusted source (a hand-authoring
-#     UI) or in CI.
-#   * a rule carrying a `proof` (a Coq tactic script) is *checked* rather than
-#     searched for — the proof-carrying path, cheap, and how an authoring pipeline
-#     should ship its evidence. Mirrors leanregate's `_carried_source`.
+# That warrant is only worth what enforces it, so `options.verify_rules`
+# re-establishes it from scratch — each rule gets its own Coq kernel run with an
+# automatic tactic. Use it for rules from a source you have not yet validated, or
+# in CI. Regate does not run a caller-supplied proof script (that is an injection
+# surface, and rule soundness is the caller's upstream job), so a `proof` field on
+# a rule is ignored; a rule outside the automatic fragment is simply unproven.
 #
 # Why this matters at all: a step that correctly applies a *false* rule proves
 # nothing, and the induction backstop certifies the goal, not the ruleset — so
@@ -248,7 +245,6 @@ class ProvenRule:
     id: str
     proven: bool
     # "trusted"  -- taken on the caller's warrant (verify_rules off)
-    # "carried"  -- the rule shipped a Coq proof and the kernel accepted it
     # "ring"     -- the kernel proved it from scratch
     method: str      # …| "rejected" | "guarded" | "unavailable" | "untranslatable"
     detail: str = ""
@@ -259,11 +255,12 @@ def verify_rules_enabled(ex: dict) -> bool:
     return bool((ex.get("options") or {}).get("verify_rules"))
 
 
-def build_rule_source(rule: dict, definitions: list[dict] | None = None,
-                      tactic: str | None = None) -> str:
+def build_rule_source(rule: dict, definitions: list[dict] | None = None) -> str:
     """A standalone Coq file proving `forall vars, lhs == rhs` for one rule.
 
-    ``tactic`` overrides the automatic tactic with the rule's carried proof script.
+    Regate does not accept a caller-supplied proof script (that is an injection
+    surface, and rule soundness is the caller's upstream responsibility): the rule
+    is discharged by an automatic tactic here, or it is simply unproven.
     """
     lhs_node, rhs_node = rule.get("lhs"), rule.get("rhs")
     if not lhs_node or not rhs_node:
@@ -292,8 +289,7 @@ def build_rule_source(rule: dict, definitions: list[dict] | None = None,
         pow_def = _build_pow_def(definitions or []) + "\n"
 
     forall = f"forall {binders}, " if binders else ""
-    auto = "first [ ring | simpl; ring | field | (field; lia) | (simpl; field) ]"
-    body = _sanitize_tactic(tactic) if tactic is not None else auto
+    body = "first [ ring | simpl; ring | field | (field; lia) | (simpl; field) ]"
     return (
         "From Coq Require Import QArith.\n"
         "From Coq Require Import Arith.\n"
@@ -314,46 +310,13 @@ def _mentions_pow(node: dict) -> bool:
                for children in (node.get("slots") or {}).values() for ch in children)
 
 
-# A carried proof is an untrusted string spliced into the Coq file inside the one
-# `Theorem regate_rule … Qed.` frame. On its own that frame can only exit 0 by
-# actually proving regate_rule. The escape is a proof that ABANDONS the real goal
-# (Admitted/Abort/Qed/Defined) and then states a decoy it *can* prove
-# (Theorem/Lemma/Definition/…), or hides one in a comment. Deny those tokens and a
-# false rule can no longer be smuggled past `coqc`.
-_FORBIDDEN_TACTIC = re.compile(
-    r"\(\*|"                                   # comment open (could hide anything)
-    r"\b(?:Qed|Defined|Admitted|Abort|admit|give_up|sorry|"
-    r"Theorem|Lemma|Example|Remark|Corollary|Proposition|Fact|"
-    r"Definition|Fixpoint|CoFixpoint|Axiom|Axioms|Conjecture|Parameter|Parameters|"
-    r"Hypothesis|Hypotheses|Variable|Variables|Context|"
-    r"Ltac|Notation|Tactic|Instance|Class|Record|Inductive|Module|Section|"
-    r"Require|Import|Export|Open|Declare|Set|Unset|Add)\b",
-    re.IGNORECASE)
-
-
-def _sanitize_tactic(tactic: str) -> str:
-    """Reject a carried proof that could break out of its theorem frame.
-
-    A legitimate rule proof is a tactic script (`intros; ring`, `field; lia`, …).
-    Anything that could close the proof early, open a declaration, or start a
-    comment is refused, so a carried proof can only ever *discharge the stated
-    rule*, never introduce a decoy theorem that makes an unsound rule 'proven'.
-    """
-    if _FORBIDDEN_TACTIC.search(tactic):
-        raise InductionError("carried proof contains a disallowed command "
-                             "(only tactic scripts are accepted)")
-    return tactic
-
-
 _RULE_CACHE: dict[str, ProvenRule] = {}
 
 
 def prove_rule(rule: dict, definitions: list[dict] | None = None) -> ProvenRule:
-    """Kernel-prove one transmitted rule. Unproven is inconclusive, not false.
-
-    Prefers the rule's *carried* proof when it has one (checking a supplied script
-    is cheaper than searching for a tactic that works); falls back to the automatic
-    tactic. Only called when `options.verify_rules` is set.
+    """Kernel-prove one transmitted rule with an automatic tactic. Unproven is
+    inconclusive, not false. A caller-supplied `proof` field is ignored — Regate
+    does not run untrusted proof scripts. Only called when `verify_rules` is set.
     """
     rid = str(rule.get("id", "?"))
     if rule.get("conditions"):
@@ -363,21 +326,10 @@ def prove_rule(rule: dict, definitions: list[dict] | None = None) -> ProvenRule:
         return ProvenRule(rid, False, "guarded",
                           "guarded rules are outside the certifiable fragment")
 
-    carried = rule.get("proof")
     try:
-        source = build_rule_source(rule, definitions, tactic=carried or None)
+        source = build_rule_source(rule, definitions)
     except InductionError as e:
-        if carried:
-            # A malformed/hostile carried proof (rejected by _sanitize_tactic) must
-            # not be trusted, but must also not fail a rule that is sound on its own
-            # merits — fall through to auto-proof, exactly as a stale proof does.
-            try:
-                source = build_rule_source(rule, definitions)
-                carried = None
-            except InductionError as e2:
-                return ProvenRule(rid, False, "untranslatable", str(e2))
-        else:
-            return ProvenRule(rid, False, "untranslatable", str(e))
+        return ProvenRule(rid, False, "untranslatable", str(e))
 
     key = hashlib.sha256(source.encode()).hexdigest()
     if key in _RULE_CACHE:
@@ -386,19 +338,7 @@ def prove_rule(rule: dict, definitions: list[dict] | None = None) -> ProvenRule:
         return ProvenRule(rid, False, "unavailable", "coq toolchain unavailable")
 
     ok, detail = coq_prover.check_source(source)
-    if ok:
-        result = ProvenRule(rid, True, "carried" if carried else "ring")
-    elif carried:
-        # The author's own script did not check. Try to prove it anyway before
-        # calling the rule unproven — a stale proof should not fail a sound rule.
-        try:
-            ok2, detail2 = coq_prover.check_source(build_rule_source(rule, definitions))
-        except InductionError as e:
-            ok2, detail2 = False, str(e)
-        result = (ProvenRule(rid, True, "ring", "carried proof rejected; auto-proved instead")
-                  if ok2 else ProvenRule(rid, False, "rejected", detail2[:400]))
-    else:
-        result = ProvenRule(rid, False, "rejected", detail[:400])
+    result = ProvenRule(rid, True, "ring") if ok else ProvenRule(rid, False, "rejected", detail[:400])
     _RULE_CACHE[key] = result
     return result
 

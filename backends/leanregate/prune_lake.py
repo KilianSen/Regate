@@ -9,8 +9,8 @@ PROJECT = os.environ.get("LEANREGATE_LEAN_PROJECT", "/app/leanproj")
 PACKAGES = os.path.join(PROJECT, ".lake", "packages")
 
 # The exact import surface the runtime ever elaborates (superset of every path:
-# _carried_source, _auto_source, lean_induction). MUST stay ⊇ the
-# imports emitted by lean_prover._carried_source / lean_induction.
+# lean_prover._auto_source and lean_induction). MUST stay ⊇ the imports those
+# emit; over-keeping is safe, under-keeping breaks the image.
 RUNTIME_IMPORTS = [
     "import Mathlib.Tactic",
     "import Mathlib.Data.Rat.Defs",

@@ -245,66 +245,28 @@ def test_verify_rules_still_certifies_a_sound_rule():
     assert resp["meta"]["ruleset"]["mul_one_left"]["method"] == "ring"
 
 
-def test_carried_proof_is_checked_not_searched():
-    # An authoring pipeline ships its evidence with the rule; the kernel checks the
-    # supplied script instead of hunting for a tactic that works.
-    carried = [dict(RULESET[0], proof="intros; ring")]
+def test_carried_proof_field_is_ignored():
+    # Regate does not run a caller-supplied proof script (injection surface; rule
+    # soundness is the caller's upstream job). A `proof` on a rule must never reach
+    # coqc — the rule is proven only by the automatic tactic, or not at all.
     fake = _install(lambda src: True)
-    resp = grade.grade(_verify(_ind_req(_sub(VALID_BASE, VALID_STEP), ruleset=carried)))
-    assert resp["meta"]["ruleset"]["mul_one_left"]["method"] == "carried"
-    assert any("intros; ring" in s for s in fake.calls)
-
-
-def test_stale_carried_proof_falls_back_to_auto():
-    # A carried proof that no longer checks must not fail an otherwise sound rule.
-    fake = _install(lambda src: "bogus_tactic" not in src)
-    carried = [dict(RULESET[0], proof="bogus_tactic")]
-    resp = grade.grade(_verify(_ind_req(_sub(VALID_BASE, VALID_STEP), ruleset=carried)))
-    assert resp["meta"]["ruleset"]["mul_one_left"]["proven"] is True
-    assert resp["meta"]["ruleset"]["mul_one_left"]["method"] == "ring"
-
-
-def test_carried_proof_injection_is_refused():
-    # A carried proof that tries to Admit the real (false) theorem and prove a decoy
-    # must be refused BEFORE it reaches coqc — otherwise a false rule certifies. The
-    # sanitizer is pure (no toolchain), so this pins the guard deterministically.
-    payloads = [
-        "admit. Admitted. Theorem t2 : True. Proof. exact I",
-        "ring. Qed. Theorem evil : forall a:Q, 0 == 1. Proof. ",
-        "(* Qed. Lemma sneak : True. *) ring",
-        "sorry",
-        "field. Defined. Definition x := 0",
-    ]
-    for p in payloads:
-        try:
-            coq_induction.build_rule_source(
-                {"id": "r", "lhs": vr("a"), "rhs": vr("a"), "conditions": []}, [], tactic=p)
-            assert False, f"sanitizer let through: {p!r}"
-        except coq_induction.InductionError:
-            pass
-    # a legitimate multi-tactic script is still accepted
-    src = coq_induction.build_rule_source(
-        {"id": "r", "lhs": vr("a"), "rhs": vr("a"), "conditions": []}, [],
-        tactic="intros. ring")
-    assert "intros. ring." in src
+    with_proof = [dict(RULESET[0], proof="admit. Admitted. Theorem t2 : True. Proof. exact I")]
+    resp = grade.grade(_verify(_ind_req(_sub(VALID_BASE, VALID_STEP), ruleset=with_proof)))
+    assert resp["meta"]["ruleset"]["mul_one_left"]["method"] == "ring"   # auto, never "carried"
+    assert all("Admitted" not in s and "t2" not in s for s in fake.calls)  # payload never emitted
 
 
 def test_injected_false_rule_is_not_proven():
-    # End to end through prove_rule with a stubbed kernel that would ACCEPT the
-    # decoy-bearing file if it ever reached coqc. The sanitizer must stop it first,
-    # so the false rule falls back to auto-proof and is rejected.
-    fake = _install(lambda src: True)          # kernel says yes to anything it sees
+    # A FALSE rule (a -> a+1) shipping an injection payload must not be provable, even
+    # against a kernel stub that would accept any decoy file. With carried proofs
+    # gone, prove_rule only auto-proves the real (false) theorem, which fails.
     from coq_induction import prove_rule, _RULE_CACHE
+    _install(lambda src: "0" not in src and "1" not in src)   # reject the real false goal
     _RULE_CACHE.clear()
-    evil = {"id": "evil", "lhs": vr("a"),
-            "rhs": add(vr("a"), num(1)),        # a -> a+1, false
-            "conditions": [],
+    evil = {"id": "evil", "lhs": vr("a"), "rhs": add(vr("a"), num(1)), "conditions": [],
             "proof": "admit. Admitted. Theorem t2 : True. Proof. exact I"}
     res = prove_rule(evil, [])
-    # The sanitizer strips the payload; the auto tactic then runs on `a == a+1`.
-    # With the stub kernel accepting, method is "ring" (not "carried") — the point
-    # is that `method != "carried"`: the decoy proof was never trusted.
-    assert res.method != "carried"
+    assert res.proven is False and res.method == "rejected"
 
 
 def test_grade_induction_invalid_wrong_result():
