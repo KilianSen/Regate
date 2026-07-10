@@ -137,11 +137,15 @@ contain **wildcards** — `{"type":"wild","value":"a"}` — matching any subtree
 
 ### The ruleset's trust boundary
 
-**A ruleset is authored and formally validated once, upstream.** The backends
-validate the student's *derivation* against it. So by default a backend takes the
-caller's warrant on `exercise.ruleset` and does not re-establish it per
-submission — that is Regate's premise, and re-proving a 29-rule ruleset on every
-grade would cost seconds of kernel time in a per-submission container.
+**A ruleset is authored and formally validated once, upstream.** Rules are an
+upstream **code contribution** — written, code-reviewed and CI-checked in the
+owning platform before deployment, never authored at runtime. The backends
+validate the student's *derivation* against that already-trusted ruleset. So by
+default a backend takes the caller's warrant on `exercise.ruleset` and does not
+re-establish it per submission — that is Regate's premise, and re-proving a
+ruleset on every grade would cost seconds of kernel time in a per-submission
+container. (A backend's built-in catalogue, where it has one, is a *test* fixture,
+not the production rule source — that always travels in the request.)
 
 **The caller warrants that `exercise.ruleset` is sound.** That warrant is
 load-bearing, because a backend cannot recover it from anything else it checks. A

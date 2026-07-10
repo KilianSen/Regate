@@ -12,13 +12,40 @@ OCI containers via Artemis's OCI runtime.
 
 | Backend | Engine | Scope | Notes |
 |---|---|---|---|
-| **[eggregate](backends/eggregate)** | egglog equality saturation + own e-graph | full derivation grading: proofs, hints, partial credit | fast; rule soundness *fuzzed* (`check_rules.py`) |
-| **[leanregate](backends/leanregate)** | Lean formal proofs | full derivation grading + induction | rules come from the API, *proven by the Lean kernel* at request time; certificates are Lean proof terms; heavy image (~9 GB) |
-| **[coqregate](backends/coqregate)** | Coq `induction` (`coqc`) | induction over ℕ (specialist) | kernel-certified like leanregate but no Mathlib; ~1.5 GB image |
+| **[eggregate](backends/eggregate)** | egglog equality saturation + own e-graph | full derivation grading: proofs, hints, partial credit | fast; per-step soundness by construction |
+| **[leanregate](backends/leanregate)** | Lean formal proofs | full derivation grading + induction | proves each transmitted rule with the Lean kernel at request time (its certificate *is* the per-rule lemma); heavy image (~9 GB) |
+| **[coqregate](backends/coqregate)** | Coq `induction` (`coqc`) | induction over ℕ (specialist) | kernel-certified; no Mathlib; ~1.5 GB image; attaches the accepted Coq source |
 | **[cvc5regate](backends/cvc5regate)** | cvc5 SMT (`--quant-ind`) | induction (specialist) — incl. inequalities & divisibility | broadest induction coverage; disproves with a numeric witness; ~60 MB image; trusts the solver (optional Carcara re-check) |
 
 Same `GradeRequest` → `GradeResponse`, same MathNode JSON, same CLI + HTTP
 transports, same request-supplied ruleset. The **conformance suite** proves it.
+
+## Where rules come from, and who validates them
+
+Regate is an **interface**. The rules an exercise uses are not built into any
+backend — they travel in each request (`exercise.ruleset`). Their source is an
+**upstream code contribution**: rules are written, code-reviewed, and CI-checked
+in the owning platform *before* they are ever deployed, never authored at runtime.
+
+So rule soundness is the **caller's** responsibility, established once upstream —
+not something a backend re-checks on every submission. Each backend therefore
+**trusts the transmitted ruleset by default** and grades the student's derivation
+against it. A backend cannot recover a bad ruleset anyway: certifying a true goal
+from steps that cite a *false* rule proves nothing, so trust has to be earned
+before the request, not during it. See the trust boundary in
+[`GRADING_PROTOCOL.md`](GRADING_PROTOCOL.md).
+
+Two consequences worth knowing up front:
+
+- The `options.verify_rules` flag lets a caller ask a backend to *re-establish*
+  soundness at request time anyway (eggregate fuzzes rules with random rationals;
+  the formal backends prove them) — a self-check for a not-yet-trusted source or CI.
+- Regate never runs a caller-supplied proof for a rule (that would be an injection
+  surface); a rule outside a backend's automatic fragment is simply unproven.
+
+The **built-in catalogue** (`backends/eggregate/eggregate/catalogue.py`, the 29
+Table-4 rules) is **only Regate's own test/demo/gate fixture** — it is not the
+production rule source, which is always the request.
 
 ## Layout
 
@@ -40,7 +67,7 @@ Makefile                 # setup / test / gate / conformance / coq / cvc5 / dock
 ```sh
 make setup          # venv + install eggregate (egglog) [needs uv]
 make test           # eggregate test suite
-make gate           # rule-library soundness gate (fails on an unsound rule)
+make gate           # soundness gate over the built-in TEST catalogue (fails on an unsound rule)
 make conformance    # run every fixture through its target backends' CLIs
 make up             # docker compose: eggregate :8000, leanregate :8001, coqregate :8002, cvc5regate :8003
 ```
