@@ -57,6 +57,52 @@ The **built-in catalogue** (`backends/eggregate/eggregate/catalogue.py`, the 29
 Table-4 rules) is **only Regate's own test/demo/gate fixture** — it is not the
 production rule source, which is always the request.
 
+## Soundness model — for a theory / math reader
+
+**The verdict is a four-valued judgement, not a boolean.** A `GradeResponse`'s
+`outcome` ranges over `{proven_equal, proven_unequal, equal_no_certificate,
+unknown}`, the last two carrying `score: null`. The design deliberately refuses to
+collapse "not proved within budget" into "false" — that conflation is the classic
+false-negative, and the four-valued codomain is what avoids it. Two dual failure
+modes are defended **separately**: a false *positive* (unsound credit) is defended
+by requiring a **re-checked certificate**, never a bare oracle bit — `certified:
+true ⟹ ∃` a re-verifiable proof object; a false *negative* (an unfair zero) is
+defended by mapping every inconclusive judgement to `score: null` (review), never
+`0`. Dually, `proven_unequal ⟹ ∃` a concrete witness (a ground assignment /
+model) — it is never returned on a mere search failure. The **load-bearing
+invariant is soundness by abstention**: no backend ever emits a false certified
+pass; where its method cannot decide, it abstains.
+
+**Trusted base, in ascending formality.** What a `certified` verdict rests on
+differs by backend, and the certificate's re-checkability tracks it:
+
+| Backend | Trusted base (TCB) | Certificate | Re-checkable by a third party? |
+|---|---|---|---|
+| eggregate | step validator + exact-ℚ evaluator + the fuzzer's coverage | a rewrite proof, re-validated by an independent kernel (`recheck_proof`) | yes (replay the steps) |
+| cvc5regate | cvc5's induction *calculus* (sound) + the solver *implementation* (trusted) | the SMT-LIB problem (+ Alethe/Carcara when exportable) | re-solve; independent re-check pending cvc5 proof export |
+| coqregate | the Coq kernel (stdlib `ring`/`field`/`lia`) | the kernel-checked `.v` source | yes (run `coqc`) |
+| leanregate | the Lean kernel + Mathlib | the accepted proof term / lemma names | yes (run `lean`) |
+
+**Soundness is relative to that base; completeness is not claimed.** eggregate is
+sound *up to the rule theory and a saturation bound* — its equivalence oracle is
+one-sided (`False` means "not proved within the bound," not "unequal"), and rule-
+library soundness is **empirical** (random-rational fuzzing, `audit.py`), not a
+proof. The kernel backends are sound up to a small, standard TCB (a proof
+assistant's checker). All four are **incomplete**, and incompleteness is *always*
+surfaced as `unknown`, never as a wrong grade: eggregate by its bounded/forward
+search, the certifiers by abstaining outside their fragment, cvc5 by timing out on
+goals that need a strengthening it will not invent.
+
+**Two standing assumptions.** (i) *Rule soundness* — every backend assumes the
+transmitted ruleset consists of sound (definedness-preserving) identities,
+discharged **upstream** (see above); this is an explicit precondition, not a
+theorem a backend proves, because a certified goal derived from steps citing a
+false rule proves nothing. (ii) *Domain* — the semantics is exact rational
+arithmetic (ℚ) as a **partial** algebra: division by zero is *undefined*, not an
+error or a lie, and a witness is only reported where both sides are defined.
+(coqregate proves rational equality as the setoid `Qeq` / `==`, not Leibniz `=` —
+the notion `ring`/`field` actually discharge.)
+
 ## Layout
 
 ```
