@@ -1,22 +1,3 @@
-"""A formal step-checker for Leanregate — the piece that consumes the proven
-rule library (`Leanregate/Basic.lean`).
-
-Leanregate's claim is *formal* soundness: a derivation is graded by checking each
-step is an **instance of a lemma proven in Lean**. This module is that check. It
-is stdlib-only (shares no code with Eggregate — only the protocol) and operates
-directly on the MathNode JSON shape.
-
-The proven rule table below mirrors `Basic.lean` one-for-one: each entry names
-the Lean theorem that certifies it. A step that instantiates one of these lemmas
-at its path is certified; a step that needs a side condition Lean would demand
-(the guarded fraction rules) or uses a rule with no proof is **not** certified —
-the grader returns `unknown` there rather than a false grade. That asymmetry is
-the whole point: Leanregate certifies only what Lean has proven.
-
-Path encoding matches the protocol / Eggregate `model.py`: a path integer indexes
-the flat child list obtained by visiting slots in *alphabetical* order (so a
-fraction is [denominator, numerator]).
-"""
 from __future__ import annotations
 
 import copy
@@ -26,27 +7,8 @@ from dataclasses import dataclass
 # ---------------------------------------------------------------------------
 # MathNode JSON helpers (the persisted {type, value?, slots} shape).
 # ---------------------------------------------------------------------------
-def _wild(name: str) -> dict:
-    return {"type": "wild", "value": name}
-
-
 def _num(v) -> dict:
     return {"type": "number", "value": str(v)}
-
-
-def _bin(op: str, left: dict, right: dict) -> dict:
-    return {"type": op, "slots": {"left": [left], "right": [right]}}
-
-
-def _frac(numerator: dict, denominator: dict) -> dict:
-    return {"type": "frac", "slots": {"numerator": [numerator], "denominator": [denominator]}}
-
-
-def _neg(inner: dict) -> dict:
-    return {"type": "neg", "slots": {"inner": [inner]}}
-
-
-A, B, C = _wild("a"), _wild("b"), _wild("c")
 
 
 def _flat_slots(node: dict) -> list[tuple[str, int]]:
@@ -122,51 +84,21 @@ def instantiate(template: dict, env: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# The proven rule library — one entry per lemma in Basic.lean.
+# A rule the Lean kernel has proven sound for THIS request.
 # ---------------------------------------------------------------------------
+# Leanregate has no built-in rule library: rules come from the API. Every rule is
+# transmitted in `exercise.ruleset` and proven at request time by `lean_prover`
+# (ring/field_simp + proof-carrying); a proven rule becomes a `ProvenRule` here
+# via `proven_from_custom`. There is no static catalogue and no `Basic.lean` — a
+# derivation can only be certified against rules the kernel has just proven.
 @dataclass(frozen=True)
 class ProvenRule:
     id: str
     lhs: dict
     rhs: dict
-    lean: str            # the theorem name in Basic.lean that certifies it
+    lean: str            # the Lean theorem name that certified this rule at request time
     bidir: bool = False
     guarded: bool = False  # needs a ≠0 hypothesis Lean would demand; not auto-discharged
-
-
-PROVEN: list[ProvenRule] = [
-    # -- Add --
-    ProvenRule("add_comm",       _bin("add", A, B), _bin("add", B, A), "add_comm'", bidir=True),
-    ProvenRule("add_assoc",      _bin("add", _bin("add", A, B), C), _bin("add", A, _bin("add", B, C)), "add_assoc'", bidir=True),
-    ProvenRule("add_zero_left",  _bin("add", _num(0), A), A, "add_zero_left"),
-    ProvenRule("add_zero_right", _bin("add", A, _num(0)), A, "add_zero_right"),
-    # -- Sub --
-    ProvenRule("sub_zero_right", _bin("sub", A, _num(0)), A, "sub_zero_right"),
-    ProvenRule("sub_self",       _bin("sub", A, A), _num(0), "sub_self'"),
-    ProvenRule("sub_as_add_neg", _bin("sub", A, B), _bin("add", A, _neg(B)), "sub_as_add_neg", bidir=True),
-    # -- Mul --
-    ProvenRule("mul_comm",         _bin("mul", A, B), _bin("mul", B, A), "mul_comm'", bidir=True),
-    ProvenRule("mul_assoc",        _bin("mul", _bin("mul", A, B), C), _bin("mul", A, _bin("mul", B, C)), "mul_assoc'", bidir=True),
-    ProvenRule("mul_one_left",     _bin("mul", _num(1), A), A, "mul_one_left"),
-    ProvenRule("mul_one_right",    _bin("mul", A, _num(1)), A, "mul_one_right"),
-    ProvenRule("mul_zero_left",    _bin("mul", _num(0), A), _num(0), "mul_zero_left"),
-    ProvenRule("mul_zero_right",   _bin("mul", A, _num(0)), _num(0), "mul_zero_right"),
-    ProvenRule("mul_distrib",      _bin("mul", A, _bin("add", B, C)), _bin("add", _bin("mul", A, B), _bin("mul", A, C)), "mul_distrib", bidir=True),
-    ProvenRule("mul_distrib_right", _bin("mul", _bin("add", B, C), A), _bin("add", _bin("mul", B, A), _bin("mul", C, A)), "mul_distrib_right", bidir=True),
-    # -- Negation --
-    ProvenRule("neg_neg",     _neg(_neg(A)), A, "neg_neg'", bidir=True),
-    ProvenRule("neg_zero",    _neg(_num(0)), _num(0), "neg_zero"),
-    ProvenRule("add_inverse", _bin("add", A, _neg(A)), _num(0), "add_inverse"),
-    # -- Equality (relational; proven via eq_comm) --
-    ProvenRule("eq_symm", _bin("eq", A, B), _bin("eq", B, A), "eq_symm'", bidir=True),
-    # -- Fraction: guarded. Lean states these only under a ≠0 hypothesis, so the
-    #    checker cannot certify them without a discharged assumption. --
-    ProvenRule("frac_one_denom", _frac(A, _num(1)), A, "frac_one_denom"),
-    ProvenRule("frac_self_one", _frac(A, A), _num(1), "frac_self_one", guarded=True),
-    ProvenRule("frac_mul_cancel_left", _frac(_bin("mul", C, A), _bin("mul", C, B)), _frac(A, B), "frac_mul_cancel_left", guarded=True),
-]
-
-BY_ID: dict[str, ProvenRule] = {r.id: r for r in PROVEN}
 
 
 def proven_from_custom(rule: dict, lean: str) -> ProvenRule:
@@ -198,16 +130,16 @@ class StepCheck:
 
 
 def check_step(state: dict, step: dict, rules: dict[str, ProvenRule] | None = None) -> StepCheck:
-    """Check one derivation step against a proven library (`rules`, default the
-    built-in `BY_ID`; runtime-proven custom rulesets pass their own table).
+    """Check one derivation step against the rules the kernel proved for this
+    request (`rules`; empty if none were transmitted/proven).
 
-    "valid"          — an instance of a proven (unguarded) lemma; result computed.
+    "valid"          — an instance of a proven (unguarded) rule; result computed.
     "invalid"        — the rule does not apply at the path, or the claimed result
-                       disagrees with the lemma's output (a fabricated step).
+                       disagrees with the rule's output (a fabricated step).
     "uncertifiable"  — structurally fine but Lean would require a side condition,
                        or the rule has no proof; Leanregate will not grade it.
     """
-    rules = BY_ID if rules is None else rules
+    rules = rules or {}
     if step.get("kind", "A") == "B":
         return StepCheck("uncertifiable", None,
                          "Leibniz substitution (kind B) is not yet wired to a Lean proof")
@@ -222,7 +154,7 @@ def check_step(state: dict, step: dict, rules: dict[str, ProvenRule] | None = No
     path = tuple(step.get("path", []))
     try:
         sub = at(state, path)
-    except (IndexError, KeyError):
+    except (IndexError, KeyError, TypeError):
         return StepCheck("invalid", None, f"path {list(path)} is not in the expression")
     env = match(pattern, sub, {})
     if env is None:
@@ -248,8 +180,8 @@ class DerivationReport:
 
 def check_derivation(source: dict, steps: list[dict],
                      rules: dict[str, ProvenRule] | None = None) -> DerivationReport:
-    """Replay a derivation, certifying each step against a proven library
-    (`rules`, default the built-in `BY_ID`)."""
+    """Replay a derivation, certifying each step against the rules proven for this
+    request (`rules`; empty ⇒ every rule step is uncertifiable)."""
     state = source
     steps_out: list[dict] = []
     for i, step in enumerate(steps):
@@ -263,3 +195,155 @@ def check_derivation(source: dict, steps: list[dict],
         steps_out.append({"index": i, "status": "valid", "reason": f"Lean: {res.lean}"})
         state = res.result
     return DerivationReport("certified", state, steps_out)
+
+
+# ---------------------------------------------------------------------------
+# Induction: certify the STUDENT's base + inductive-step derivations.
+# ---------------------------------------------------------------------------
+# A proof by induction over `inductionVar` is graded like two ordinary
+# derivations: the base case reduces P(0) to a tautology, and the inductive step
+# reduces P(k+1) to a tautology while licensed to substitute the hypothesis P(k).
+# The induction schema itself (Nat.rec) is sound, so two certified obligations
+# certify ∀n.P(n). grade.py additionally runs lean_induction as a kernel backstop
+# (it guards against inconsistent transmitted `definitions`). Crucially this reads
+# the submission — an empty/garbage proof can no longer be auto-certified.
+def substitute(node: dict, var: str, repl: dict) -> dict:
+    """Replace every `variable var` in `node` with `repl` (structural)."""
+    if node.get("type") == "variable" and str(node.get("value")) == var:
+        return copy.deepcopy(repl)
+    if "slots" not in node:
+        return copy.deepcopy(node)
+    out: dict = {"type": node["type"]}
+    if "value" in node:
+        out["value"] = node["value"]
+    out["slots"] = {k: [substitute(c, var, repl) for c in v]
+                    for k, v in node["slots"].items()}
+    return out
+
+
+def _is_reflexive(node: dict) -> bool:
+    """True when `node` is an equality whose two sides are syntactically equal."""
+    if node.get("type") != "eq":
+        return False
+    s = node["slots"]
+    return s["left"][0] == s["right"][0]
+
+
+def induction_rules(ex: dict, proven: dict[str, ProvenRule]) -> dict[str, ProvenRule]:
+    """The kernel-proven inline rules (`proven`, from grade.py) plus the
+    transmitted recursive `definitions` (pow_zero/…) as rewrite rules. The
+    definitions are definitional equalities for the `def pw` the Lean backstop
+    builds; that backstop re-proves the whole goal, so an inconsistent definition
+    cannot yield a certified verdict."""
+    rules = dict(proven)
+    for d in (ex.get("definitions") or []):
+        if d.get("id") and d.get("lhs") and d.get("rhs"):
+            rules[str(d["id"])] = proven_from_custom(d, str(d["id"]))
+    return rules
+
+
+def _check_case(source: dict, steps: list[dict], rules: dict[str, ProvenRule],
+                ih: tuple[dict, dict] | None) -> DerivationReport:
+    """Replay one induction case. `ih=(lhs,rhs)` licenses a kind-B substitution
+    by the inductive hypothesis (only in the step); the base passes ih=None."""
+    state = source
+    steps_out: list[dict] = []
+    for i, step in enumerate(steps):
+        if step.get("kind") == "B":
+            if ih is None:
+                r = "Leibniz substitution with no inductive hypothesis available"
+                steps_out.append({"index": i, "status": "open", "reason": r})
+                return DerivationReport("uncertifiable", None, steps_out, i, r)
+            eqn = step.get("equation")
+            if not (isinstance(eqn, list) and len(eqn) == 2
+                    and eqn[0] == ih[0] and eqn[1] == ih[1]):
+                r = "Leibniz substitution is not the inductive hypothesis"
+                steps_out.append({"index": i, "status": "invalid", "reason": r})
+                return DerivationReport("invalid", None, steps_out, i, r)
+            path = tuple(step.get("path", []))
+            try:
+                target = at(state, path)
+            except (IndexError, KeyError, TypeError):
+                r = f"path {list(path)} is not in the expression"
+                steps_out.append({"index": i, "status": "invalid", "reason": r})
+                return DerivationReport("invalid", None, steps_out, i, r)
+            if target != ih[0]:
+                r = "the substituted subterm is not the inductive hypothesis' LHS"
+                steps_out.append({"index": i, "status": "invalid", "reason": r})
+                return DerivationReport("invalid", None, steps_out, i, r)
+            result = replace(state, path, copy.deepcopy(ih[1]))
+            claimed = step.get("result")
+            if claimed is not None and claimed != result:
+                r = "claimed result does not match the inductive-hypothesis substitution"
+                steps_out.append({"index": i, "status": "invalid", "reason": r})
+                return DerivationReport("invalid", None, steps_out, i, r)
+            steps_out.append({"index": i, "status": "valid", "reason": "inductive hypothesis"})
+            state = result
+            continue
+        res = check_step(state, step, rules)
+        if res.status == "invalid":
+            steps_out.append({"index": i, "status": "invalid", "reason": res.reason})
+            return DerivationReport("invalid", None, steps_out, i, res.reason)
+        if res.status == "uncertifiable":
+            steps_out.append({"index": i, "status": "open", "reason": res.reason})
+            return DerivationReport("uncertifiable", None, steps_out, i, res.reason)
+        steps_out.append({"index": i, "status": "valid", "reason": f"Lean: {res.lean}"})
+        state = res.result
+    return DerivationReport("certified", state, steps_out)
+
+
+@dataclass
+class InductionReport:
+    status: str                  # "certified" | "invalid" | "uncertifiable"
+    reason: str = ""
+    base: DerivationReport | None = None
+    step: DerivationReport | None = None
+
+
+def check_induction(ex: dict, sub: dict,
+                    proven: dict[str, ProvenRule] | None = None) -> InductionReport:
+    """Certify the submitted base + inductive-step derivations for an induction
+    exercise, using the kernel-proven inline rules (`proven`) + the transmitted
+    definitions. Returns "invalid" (a wrong step or a missing obligation),
+    "uncertifiable" (valid but unfinished / outside the proven fragment), or
+    "certified" (both obligations reduce their goal to a tautology)."""
+    goal = ex.get("goal")
+    var = ex.get("inductionVar")
+    if not goal or goal.get("type") != "eq" or not var:
+        return InductionReport("uncertifiable",
+                               "induction goal must be an equality with an inductionVar")
+    var = str(var)
+    base_steps = (sub.get("base") or {}).get("steps")
+    step_steps = (sub.get("step") or {}).get("steps")
+    if not base_steps or not step_steps:
+        # No (complete) derivation was submitted — the student has not *attempted*
+        # the obligations. That is not the same as a *wrong* proof: an absent
+        # derivation must never be scored `invalid_derivation`/0 (a false zero on a
+        # possibly-true theorem). Report it as uncertifiable so grade.py routes it
+        # to `unknown` (route to review), honoring "never a false grade".
+        return InductionReport("uncertifiable",
+                               "no induction derivation submitted: both a base-case and an "
+                               "inductive-step derivation are required to grade the proof")
+
+    rules = induction_rules(ex, proven or {})
+    base_goal = substitute(goal, var, _num(0))
+    succ = {"type": "succ", "slots": {"inner": [{"type": "variable", "value": var}]}}
+    step_goal = substitute(goal, var, succ)
+    ih = (goal["slots"]["left"][0], goal["slots"]["right"][0])  # P(var)
+
+    base = _check_case(base_goal, base_steps, rules, ih=None)
+    if base.status != "certified":
+        return InductionReport(base.status, f"base case: {base.reason}", base=base)
+    if not _is_reflexive(base.final):
+        return InductionReport("uncertifiable",
+                               "base case did not reduce both sides to a common form", base=base)
+
+    step = _check_case(step_goal, step_steps, rules, ih=ih)
+    if step.status != "certified":
+        return InductionReport(step.status, f"inductive step: {step.reason}", base=base, step=step)
+    if not _is_reflexive(step.final):
+        return InductionReport("uncertifiable",
+                               "inductive step did not reduce both sides to a common form",
+                               base=base, step=step)
+    return InductionReport("certified",
+                           "base case and inductive step both certified", base=base, step=step)

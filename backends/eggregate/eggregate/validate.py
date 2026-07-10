@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from .catalogue import Rule
+from .rule import Rule
 from .conditions import DISCHARGED, OPEN, VIOLATED, Assumption, SideCondition, discharge
 from .matching import instantiate, match
 from .model import MathNode, Path, pretty
@@ -67,10 +67,23 @@ def apply_rule(state: MathNode, rule: Rule, path: Path, *, reverse: bool = False
         return StepResult(INVALID,
                           reason=f"{rule.id} does not match {pretty(sub)} at {list(path)}")
 
-    # Discharge guards against the bindings and the student's assumptions.
+    # Discharge guards against the bindings and the student's assumptions. A guard
+    # on a wildcard the *pattern* does not bind cannot be decided at all -- that
+    # happens when a guarded rule is run in the direction whose pattern drops the
+    # guarded variable (reverse `a/a -> 1`: the `1` says nothing about `a`).
+    # Applying it would silently invent a witness for the guard, so refuse.
     open_conds, violated = [], []
     for cond in rule.conditions:
-        verdict = discharge(cond, env[cond.var], assumptions)
+        binding = env.get(cond.var)
+        if binding is None:
+            side = "rhs" if reverse else "lhs"
+            return StepResult(
+                INVALID,
+                reason=f"{rule.id} cannot be applied "
+                       f"{'in reverse' if reverse else 'forward'}: its side condition on "
+                       f"'{cond.var}' is undecidable because the {side} pattern does not "
+                       f"bind '{cond.var}'")
+        verdict = discharge(cond, binding, assumptions)
         if verdict == VIOLATED:
             violated.append(cond)
         elif verdict == OPEN:

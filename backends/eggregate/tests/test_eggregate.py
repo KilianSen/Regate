@@ -1,7 +1,3 @@
-"""Tests that pin Eggregate to the thesis's Appendix B numbers.
-
-Run:  .venv/bin/python -m pytest test_eggregate.py   (or just run this file)
-"""
 from __future__ import annotations
 
 import os
@@ -382,6 +378,184 @@ def test_recheck_rejects_tampered_proof():
                              proof[-1].path, add(X, num(99)))   # lie about the result
     assert recheck_proof(SOURCE, proof)
     assert not recheck_proof(SOURCE, tampered)
+
+
+# -- grown catalogue: negation + fraction rules (Tier 3) --------------------
+def test_new_negation_and_fraction_rules_extend_reach():
+    A, B, C, D = var("a"), var("b"), var("c"), var("d")
+    y = var("y")
+    assert equivalent(neg(add(X, y)), add(neg(X), neg(y)))            # neg_add
+    assert equivalent(mul(neg(X), y), neg(mul(X, y)))                 # mul_neg_left
+    assert equivalent(add(frac(X, C), frac(y, C)), frac(add(X, y), C))  # frac_add_same_denom
+    assert equivalent(mul(frac(A, B), frac(C, D)), frac(mul(A, C), mul(B, D)))  # frac_mul
+
+
+def test_grown_catalogue_still_sound():
+    from eggregate import audit_catalogue
+    audits = audit_catalogue(trials=400)
+    assert len(audits) == 29 and all(a.sound for a in audits)
+
+
+# -- AC normalisation (Tier 3) ----------------------------------------------
+def test_ac_normalize_canonicalises_commutative_associative():
+    from eggregate import ac_normalize
+    y, z = var("y"), var("z")
+    assert ac_normalize(add(y, X)) == ac_normalize(add(X, y))                 # commutativity
+    assert ac_normalize(add(add(X, y), z)) == ac_normalize(add(X, add(y, z)))  # associativity
+    assert ac_normalize(add(X, y)) != ac_normalize(add(X, z))                 # genuinely different
+
+
+def test_service_ac_normalization_accepts_commuted_target():
+    from eggregate.model import to_json
+    from eggregate.service import grade
+    yy = var("y")
+    src, tgt = add(X, yy), add(yy, X)   # x+y  vs target  y+x, no commutativity rule given
+
+    def run(ac):
+        return grade({"protocol": "1.0", "exercise": {
+            "mode": "transformation", "source": to_json(src), "target": to_json(tgt),
+            "rules": ["add_zero_right"], "options": {"ac_normalization": ac}},
+            "submission": {"final": to_json(src)}})
+
+    assert run(False)["outcome"] != "proven_equal"          # can't prove without comm
+    r = run(True)
+    assert r["outcome"] == "proven_equal" and r["score"] == 100 and r["certified"]
+
+
+def test_service_ac_still_disproves_wrong_answer():
+    from eggregate.model import to_json
+    from eggregate.service import grade
+    yy = var("y")
+    r = grade({"protocol": "1.0", "exercise": {
+        "mode": "transformation", "source": to_json(add(X, yy)), "target": to_json(add(X, yy)),
+        "rules": "ALL", "options": {"ac_normalization": True}},
+        "submission": {"final": to_json(add(X, num(1)))}})   # x+1 is not x+y
+    assert r["outcome"] == "proven_unequal" and r["score"] == 0
+
+
+# -- regression tests for the audit-hardening (previously unpinned) ----------
+# Each of these fails if the corresponding fix is reverted. They pin: the three
+# uncaught-exception paths that used to become HTTP 500 / CLI exit 1, and the
+# assumptions threading that used to be dropped on every path but `steps`.
+def _svc(request):
+    from eggregate.service import grade as _g
+    return _g(request)
+
+
+def _err(request):
+    """Return the RequestError message, or None if grade() did not raise it."""
+    from eggregate.service import RequestError
+    try:
+        _svc(request)
+        return None
+    except RequestError as e:
+        return str(e)
+    # any *other* exception propagates: that is the bug these tests guard against.
+
+
+def test_reverse_guarded_rule_does_not_crash():
+    # A bidirectional guarded rule applied in reverse: the RHS pattern (`1`) does
+    # not bind the guarded var `a`, so the guard is undecidable. Must be a clean
+    # invalid step, never a KeyError escaping as a 500.
+    from eggregate.model import to_json
+    wa = {"type": "wild", "value": "a"}
+    rs = [{"id": "self_one", "owner": "frac",
+           "lhs": {"type": "frac", "slots": {"denominator": [wa], "numerator": [wa]}},
+           "rhs": {"type": "number", "value": "1"}, "bidirectional": True,
+           "conditions": [{"kind": "nonzero", "var": "a"}]}]
+    req = {"protocol": "1.0", "exercise": {
+        "mode": "transformation", "source": {"type": "number", "value": "1"},
+        "target": to_json(frac(X, X)), "ruleset": rs,
+        "assumptions": [{"kind": "nonzero", "value": to_json(X)}]},
+        "submission": {"steps": [{"rule": "self_one", "path": [], "direction": "reverse",
+                                  "kind": "A", "result": to_json(frac(X, X))}]}}
+    r = _svc(req)      # must not raise
+    assert r["outcome"] == "invalid_derivation" and not r["certified"]
+
+
+def test_kind_b_step_missing_equation_is_400():
+    from eggregate.model import to_json
+    msg = _err({"protocol": "1.0", "exercise": {
+        "mode": "transformation", "source": to_json(X), "target": to_json(X), "rules": "ALL"},
+        "submission": {"steps": [{"kind": "B", "path": []}]}})
+    assert msg is not None and "equation" in msg
+
+
+def test_malformed_mathnode_is_400_not_500():
+    msg = _err({"protocol": "1.0", "exercise": {
+        "mode": "transformation", "source": {"type": "bogus"},
+        "target": {"type": "variable", "value": "x"}, "rules": "ALL"},
+        "submission": {"final": {"type": "variable", "value": "x"}}})
+    assert msg is not None and "malformed" in msg
+
+
+def test_pow_in_transformation_mode_does_not_crash():
+    # `pow`/`succ` are legal MathNodes (induction uses them). Reaching the ℚ
+    # evaluator via decide_equivalence used to raise ValueError -> 500.
+    pw = {"type": "pow", "slots": {"base": [{"type": "variable", "value": "a"}],
+                                   "exponent": [{"type": "number", "value": "1"}]}}
+    r = _svc({"protocol": "1.0", "exercise": {
+        "mode": "transformation", "source": pw, "target": pw, "rules": "ALL"},
+        "submission": {"final": {"type": "variable", "value": "a"}}})
+    assert r["outcome"] == "unknown" and r["score"] is None      # honest, not a crash
+
+
+def test_pow_is_evaluated_for_a_sound_disproof():
+    # a^2 is not a: the evaluator must now compute pow to find the counterexample.
+    pw = {"type": "pow", "slots": {"base": [{"type": "variable", "value": "a"}],
+                                   "exponent": [{"type": "number", "value": "2"}]}}
+    r = _svc({"protocol": "1.0", "exercise": {
+        "mode": "transformation", "source": pw, "target": pw, "rules": "ALL"},
+        "submission": {"final": {"type": "variable", "value": "a"}}})
+    assert r["outcome"] == "proven_unequal" and r["witness"] is not None
+
+
+def test_assumption_certifies_a_guarded_equation():
+    # x/x = 1 holds only under x != 0. With the assumption declared, the equation
+    # certifies; without it, the grader must stay honestly inconclusive. This pins
+    # assumptions reaching decide_equivalence (they used to be dropped there).
+    from eggregate.model import to_json
+    eq_node = {"type": "eq", "slots": {"left": [to_json(frac(X, X))],
+                                       "right": [{"type": "number", "value": "1"}]}}
+    base = {"protocol": "1.0", "exercise": {
+        "mode": "equation", "source": eq_node, "target": None, "rules": ["frac_self_one"]},
+        "submission": {"final": eq_node}}
+    with_assump = {**base, "exercise": {**base["exercise"],
+                   "assumptions": [{"kind": "nonzero", "value": to_json(X)}]}}
+    assert _svc(with_assump)["outcome"] == "proven_equal"
+    assert _svc(base)["outcome"] == "unknown"
+
+
+def test_declared_nonzero_is_not_a_counterexample():
+    # Under x != 0, x = 0 must be excluded from the counterexample search — else a
+    # true-under-assumption identity is wrongly reported proven_unequal.
+    from eggregate.model import to_json
+    src = frac(mul(X, var("b")), mul(X, var("a")))
+    r = _svc({"protocol": "1.0", "exercise": {
+        "mode": "transformation", "source": to_json(src), "target": to_json(frac(var("b"), var("a"))),
+        "rules": ["frac_mul_cancel_left"],
+        "assumptions": [{"kind": "nonzero", "value": to_json(X)}]},
+        "submission": {"final": to_json(frac(var("b"), var("a")))}})
+    assert r["outcome"] == "proven_equal" and r["witness"] is None
+
+
+def test_verify_rules_rejects_unsound_inline_rule():
+    # options.verify_rules re-establishes the ruleset warrant: an inline rule that
+    # lies (a*b -> b) is rejected with a counterexample, on the induction path too.
+    from eggregate.model import to_json
+    bad = [{"id": "drop_left", "owner": "mul",
+            "lhs": {"type": "mul", "slots": {"left": [{"type": "wild", "value": "a"}],
+                                             "right": [{"type": "wild", "value": "b"}]}},
+            "rhs": {"type": "wild", "value": "b"}, "bidirectional": False, "conditions": []}]
+    msg = _err({"protocol": "1.0", "exercise": {
+        "mode": "transformation", "source": to_json(X), "target": to_json(X),
+        "ruleset": bad, "options": {"verify_rules": True}},
+        "submission": {"final": to_json(X)}})
+    assert msg is not None and "drop_left" in msg
+    # ...and trusted by default: the same request without the flag does not raise.
+    assert _err({"protocol": "1.0", "exercise": {
+        "mode": "transformation", "source": to_json(X), "target": to_json(X), "ruleset": bad},
+        "submission": {"final": to_json(X)}}) is None
 
 
 if __name__ == "__main__":

@@ -18,7 +18,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from time import perf_counter
 
-from .catalogue import Rule
+from .rule import Rule
 from .hints import shortest_path
 from .model import MathNode, Path, pretty
 from .proof_egraph import egg_prove

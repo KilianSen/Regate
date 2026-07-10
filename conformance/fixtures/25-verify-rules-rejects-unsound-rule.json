@@ -1,0 +1,346 @@
+{
+  "name": "25-verify-rules-rejects-unsound-rule",
+  "description": "The same false rule as fixture 24, with options.verify_rules set. Every formal backend must re-prove the transmitted ruleset and refuse to certify: a step citing an unproven rule is `unknown` (route to review), never `invalid_derivation` -- the student followed the rule they were handed; it is the exercise that is broken. Eggregate's analogue is the rational fuzzer, which rejects the request outright with a counterexample. Holds with or without a toolchain: an absent prover cannot prove the rule either.",
+  "request": {
+    "protocol": "1.0",
+    "exercise": {
+      "id": "ind-1",
+      "mode": "induction",
+      "goal": {
+        "type": "eq",
+        "slots": {
+          "left": [
+            {
+              "type": "pow",
+              "slots": {
+                "base": [
+                  {
+                    "type": "number",
+                    "value": "1"
+                  }
+                ],
+                "exponent": [
+                  {
+                    "type": "variable",
+                    "value": "n"
+                  }
+                ]
+              }
+            }
+          ],
+          "right": [
+            {
+              "type": "number",
+              "value": "1"
+            }
+          ]
+        }
+      },
+      "inductionVar": "n",
+      "ruleset": [
+        {
+          "id": "drop_left",
+          "owner": "mul",
+          "lhs": {
+            "type": "mul",
+            "slots": {
+              "left": [
+                {
+                  "type": "wild",
+                  "value": "a"
+                }
+              ],
+              "right": [
+                {
+                  "type": "wild",
+                  "value": "b"
+                }
+              ]
+            }
+          },
+          "rhs": {
+            "type": "wild",
+            "value": "b"
+          },
+          "bidirectional": false,
+          "conditions": []
+        }
+      ],
+      "definitions": [
+        {
+          "id": "pow_zero",
+          "lhs": {
+            "type": "pow",
+            "slots": {
+              "base": [
+                {
+                  "type": "wild",
+                  "value": "a"
+                }
+              ],
+              "exponent": [
+                {
+                  "type": "number",
+                  "value": "0"
+                }
+              ]
+            }
+          },
+          "rhs": {
+            "type": "number",
+            "value": "1"
+          },
+          "bidirectional": false,
+          "conditions": []
+        },
+        {
+          "id": "pow_succ",
+          "lhs": {
+            "type": "pow",
+            "slots": {
+              "base": [
+                {
+                  "type": "wild",
+                  "value": "a"
+                }
+              ],
+              "exponent": [
+                {
+                  "type": "succ",
+                  "slots": {
+                    "inner": [
+                      {
+                        "type": "wild",
+                        "value": "n"
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          },
+          "rhs": {
+            "type": "mul",
+            "slots": {
+              "left": [
+                {
+                  "type": "wild",
+                  "value": "a"
+                }
+              ],
+              "right": [
+                {
+                  "type": "pow",
+                  "slots": {
+                    "base": [
+                      {
+                        "type": "wild",
+                        "value": "a"
+                      }
+                    ],
+                    "exponent": [
+                      {
+                        "type": "wild",
+                        "value": "n"
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          },
+          "bidirectional": false,
+          "conditions": []
+        }
+      ],
+      "options": {
+        "verify_rules": true
+      }
+    },
+    "submission": {
+      "base": {
+        "steps": [
+          {
+            "rule": "pow_zero",
+            "path": [
+              0
+            ],
+            "result": {
+              "type": "eq",
+              "slots": {
+                "left": [
+                  {
+                    "type": "number",
+                    "value": "1"
+                  }
+                ],
+                "right": [
+                  {
+                    "type": "number",
+                    "value": "1"
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "step": {
+        "steps": [
+          {
+            "rule": "pow_succ",
+            "path": [
+              0
+            ],
+            "result": {
+              "type": "eq",
+              "slots": {
+                "left": [
+                  {
+                    "type": "mul",
+                    "slots": {
+                      "left": [
+                        {
+                          "type": "number",
+                          "value": "1"
+                        }
+                      ],
+                      "right": [
+                        {
+                          "type": "pow",
+                          "slots": {
+                            "base": [
+                              {
+                                "type": "number",
+                                "value": "1"
+                              }
+                            ],
+                            "exponent": [
+                              {
+                                "type": "variable",
+                                "value": "n"
+                              }
+                            ]
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ],
+                "right": [
+                  {
+                    "type": "number",
+                    "value": "1"
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "kind": "B",
+            "path": [
+              0,
+              1
+            ],
+            "equation": [
+              {
+                "type": "pow",
+                "slots": {
+                  "base": [
+                    {
+                      "type": "number",
+                      "value": "1"
+                    }
+                  ],
+                  "exponent": [
+                    {
+                      "type": "variable",
+                      "value": "n"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "number",
+                "value": "1"
+              }
+            ],
+            "result": {
+              "type": "eq",
+              "slots": {
+                "left": [
+                  {
+                    "type": "mul",
+                    "slots": {
+                      "left": [
+                        {
+                          "type": "number",
+                          "value": "1"
+                        }
+                      ],
+                      "right": [
+                        {
+                          "type": "number",
+                          "value": "1"
+                        }
+                      ]
+                    }
+                  }
+                ],
+                "right": [
+                  {
+                    "type": "number",
+                    "value": "1"
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "rule": "drop_left",
+            "path": [
+              0
+            ],
+            "result": {
+              "type": "eq",
+              "slots": {
+                "left": [
+                  {
+                    "type": "number",
+                    "value": "1"
+                  }
+                ],
+                "right": [
+                  {
+                    "type": "number",
+                    "value": "1"
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      }
+    }
+  },
+  "expect": {
+    "eggregate": {
+      "error": true
+    },
+    "leanregate": {
+      "outcome": "unknown",
+      "score": null,
+      "certified": false
+    },
+    "coqregate": {
+      "outcome": "unknown",
+      "score": null,
+      "certified": false
+    },
+    "cvc5regate": {
+      "outcome": "unknown",
+      "score": null,
+      "certified": false
+    }
+  }
+}

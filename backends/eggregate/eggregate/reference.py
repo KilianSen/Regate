@@ -23,7 +23,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .catalogue import CATALOGUE, Rule
+from .catalogue import CATALOGUE
+from .rule import Rule
 from .hints import Step, shortest_path
 from .model import MathNode, distance
 from .validate import Move, verify_chain

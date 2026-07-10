@@ -22,7 +22,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .catalogue import CATALOGUE, Rule
+from .catalogue import CATALOGUE
+from .rule import Rule
 from .model import MathNode
 from .proof_egraph import (
     Directed, ProofEGraph, ProofStep, directed_rules, egg_prove,

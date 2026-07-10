@@ -22,14 +22,66 @@ jobs:
       - uses: actions/setup-python@v5
         with: { python-version: "3.13" }
       - run: pip install -e backends/eggregate
-      - name: protocol conformance (both backends)
+      # Install the two lightweight provers so conformance exercises the formal
+      # backends' *certified* induction paths (fixtures 23/25) rather than skipping
+      # them: cvc5 is a ~60 MB wheel, coq is an apt package (~1 min). leanregate
+      # stays skipped here — its Mathlib olean closure is ~9 GB, impractical for a
+      # per-PR job — and is covered by the dedicated `leanregate` job below via
+      # check_induction.py. The runner's `requires:` gate skips, never fails, when a
+      # tool is absent, so this job still passes if an install step is removed.
+      - run: pip install cvc5
+      - run: sudo apt-get update && sudo apt-get install -y coq
+      - name: protocol conformance (target backends)
         run: python conformance/run_conformance.py
 
   leanregate:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.13" }
       - uses: leanprover/lean-action@v1
         with:
           lake-package-directory: backends/leanregate
-      # builds & checks backends/leanregate/Leanregate/Basic.lean (the verified rule library)
+          build: false            # no Lean library to build — rules come from the API
+      # Leanregate has no Basic.lean. Its formal guarantee is exercised live: fetch
+      # Mathlib's oleans, then have the runtime prover emit + kernel-check the
+      # induction proofs. A regressed prover/emitter fails CI here.
+      - name: fetch Mathlib oleans
+        working-directory: backends/leanregate
+        run: lake exe cache get
+      - name: emitted induction proofs kernel-check (live Lean)
+        working-directory: backends/leanregate
+        env:
+          LEANREGATE_LEAN_PROJECT: ${{ github.workspace }}/backends/leanregate
+        run: python check_induction.py --require-lean
+
+  coqregate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.13" }
+      # `coq` from apt carries coqc + the stdlib (ring/field/lia) — no Mathlib.
+      - name: install Coq
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends coq
+      - name: coqregate unit tests
+        run: python backends/coqregate/tests/test_coq_prover.py
+      - name: emitted induction proofs kernel-check (live coqc)
+        working-directory: backends/coqregate
+        run: python check_induction.py --require-coq
+
+  cvc5regate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.13" }
+      # Single static solver binary — no library to build.
+      - name: install cvc5
+        run: pip install cvc5
+      - name: cvc5regate unit tests
+        run: python backends/cvc5regate/tests/test_cvc5_prover.py
+      - name: emitted induction goals solved (live cvc5)
+        working-directory: backends/cvc5regate
+        run: python check_induction.py --require-cvc5

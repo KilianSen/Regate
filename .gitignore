@@ -8,6 +8,8 @@ __pycache__/
 # Lean
 backends/leanregate/.lake/
 backends/leanregate/build/
+backends/leanregate/lake-manifest.json
+backends/leanregate/Regate/        # runtime scratch: lean_prover/check_induction write proofs here
 
 # IDE / OS
 .idea/
@@ -16,3 +18,4 @@ backends/leanregate/build/
 
 # Eggregate experiment artifacts (the patched 3.15t wheel/source)
 vendor/
+Artemis/

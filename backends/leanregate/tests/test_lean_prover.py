@@ -1,11 +1,3 @@
-"""Runtime-prover tests for Leanregate. The Lean toolchain is not present in the
-test/scaffold env, so these stub the single subprocess seam (`_run_lean`) and the
-`lean_available` probe: everything *around* Lean — MathNode→Lean translation,
-the hybrid auto/proof-carrying decision, caching, and the grade.py wiring — is
-exercised here. The Lean invocation itself is verified in CI / the container.
-
-Runnable standalone:  python tests/test_lean_prover.py
-"""
 from __future__ import annotations
 
 import os
@@ -16,7 +8,14 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import grade
 import lean_check
 import lean_prover
-from lean_check import _bin, _frac, _num, _neg, A, B, C
+
+# MathNode builders (local to the test; leanregate has no built-in rule library).
+def _wild(name): return {"type": "wild", "value": name}
+def _num(v): return {"type": "number", "value": str(v)}
+def _bin(op, l, r): return {"type": op, "slots": {"left": [l], "right": [r]}}
+def _frac(n, d): return {"type": "frac", "slots": {"numerator": [n], "denominator": [d]}}
+def _neg(x): return {"type": "neg", "slots": {"inner": [x]}}
+A, B, C = _wild("a"), _wild("b"), _wild("c")
 
 
 # --- a stub Lean: succeeds on a configurable allow-list of theorem bodies ------
@@ -74,13 +73,19 @@ def test_auto_prove_rejects_unsound_rule():
     assert not r.proven and r.method == "rejected"
 
 
-def test_proof_carrying_fallback():
-    # auto-prove fails (relational rule), but a supplied proof checks out.
-    fake = _install(lambda body: "import Mathlib\n" in body)  # only the carried file imports full Mathlib
+def test_relational_rule_outside_auto_fragment_is_unproven():
+    # A relational (`iff`) rule like eq_symm is outside what the automatic tactic
+    # (`ring`/`field_simp`) discharges. With carried proofs removed, leanregate
+    # cannot prove it and a supplied `proof` is ignored — so the rule is unproven
+    # (a step citing it grades `unknown`, never certified). This is the deliberate
+    # cost of not running caller-supplied proof scripts.
+    # `ring`/`field_simp` cannot close an `↔` goal, so the auto attempt fails.
+    fake = _install(lambda body: "↔" not in body)
     r = lean_prover.prove_rule({"id": "eq_symm", "lhs": _bin("eq", A, B),
                                 "rhs": _bin("eq", B, A), "bidirectional": True,
                                 "proof": "exact eq_comm"})
-    assert r.proven and r.method == "proof"
+    assert not r.proven and r.method == "rejected"
+    assert all("eq_comm" not in b for b in fake.calls)   # the proof was never elaborated
 
 
 def test_cache_dedupes_by_content():
@@ -122,15 +127,44 @@ def test_grade_unknown_when_rule_unproven():
 
 
 def test_grade_unknown_when_lean_unavailable():
+    # No toolchain ⇒ the transmitted ruleset cannot be proven ⇒ a step using it is
+    # uncertifiable ⇒ unknown (rules come from the API; there is no fallback library).
     lean_prover._CACHE.clear()
     lean_prover.lean_available = lambda: False          # type: ignore[assignment]
+    x = {"type": "variable", "value": "x"}
+    y = {"type": "variable", "value": "y"}
     req = {"protocol": "1.0",
-           "exercise": {"mode": "transformation", "source": _num(1), "target": _num(1),
+           "exercise": {"mode": "transformation", "source": _bin("add", x, y),
+                        "target": _bin("add", y, x),
                         "ruleset": [{"id": "x", "lhs": _bin("add", A, B), "rhs": _bin("add", B, A),
-                                     "conditions": []}]},
-           "submission": {"final": _num(1)}}
+                                     "bidirectional": True, "conditions": []}]},
+           "submission": {"steps": [{"kind": "A", "rule": "x", "path": [],
+                                     "direction": "forward"}]}}
     resp = grade.grade(req)
     assert resp["outcome"] == "unknown"
+
+
+def test_carried_proof_field_is_ignored():
+    # Regate does not run a caller-supplied Lean proof (injection surface; rule
+    # soundness is the caller's upstream job). A `proof` on a rule must never be
+    # elaborated — the rule is proven only by the automatic tactic, or not at all.
+    calls = []
+
+    def fake_run(body):
+        calls.append(body)
+        return (True, "")            # kernel would accept anything it is handed
+
+    lean_prover.lean_available = lambda: True          # type: ignore[assignment]
+    lean_prover._run_lean = fake_run                   # type: ignore[assignment]
+    lean_prover._CACHE.clear()
+    rule = {"id": "r",
+            "lhs": {"type": "mul", "slots": {"left": [{"type": "number", "value": "1"}],
+                                             "right": [{"type": "wild", "value": "a"}]}},
+            "rhs": {"type": "wild", "value": "a"},
+            "proof": "sorry\ntheorem evil : (0:Q) = 1 := by sorry"}
+    res = lean_prover.prove_rule(rule)
+    assert res.method == "ring"                        # auto path, never "proof"
+    assert all("sorry" not in b and "evil" not in b for b in calls)   # payload never elaborated
 
 
 def _run_all():

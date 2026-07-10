@@ -18,7 +18,8 @@ import random
 from dataclasses import dataclass
 from fractions import Fraction
 
-from .catalogue import CATALOGUE, Rule
+from .catalogue import CATALOGUE
+from .rule import Rule
 from .conditions import SideCondition
 from .model import MathNode
 from .semantics import evaluate, free_vars

@@ -34,7 +34,8 @@ from egglog import (
 )
 from egglog import StringLike
 
-from .catalogue import CATALOGUE, Rule
+from .catalogue import CATALOGUE
+from .rule import Rule
 from .model import MathNode
 
 
@@ -191,9 +192,18 @@ class EGraphView:
 
 def equivalent(x: MathNode, y: MathNode, rules: list[Rule] | None = None,
                bound: int = DEFAULT_BOUND) -> bool:
-    """Are ``x`` and ``y`` provably equal under the (bounded) rule theory?"""
-    view = EGraphView(x, y, rules=rules, bound=bound)
-    return view.same_class(x, y)
+    """Are ``x`` and ``y`` provably equal under the (bounded) rule theory?
+
+    A term outside the egglog signature (``pow``, ``succ`` — the induction ops the
+    theory does not model) simply yields no oracle evidence. Returning ``False``
+    is the sound direction: the oracle can only ever *fail* to see an equality,
+    and ``decide_equivalence`` reads that as UNKNOWN, never as "unequal".
+    """
+    try:
+        view = EGraphView(x, y, rules=rules, bound=bound)
+        return view.same_class(x, y)
+    except ValueError:                  # cannot translate an op into the theory
+        return False
 
 
 def grade(student_final: MathNode, target: MathNode,

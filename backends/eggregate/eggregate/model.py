@@ -8,8 +8,10 @@ visiting slots in alphabetical order".  A fraction therefore exposes
 numerator -- so the inner sum ``x + 0`` of ``3*(x+0) / (3*1)`` lives at path
 ``[1, 1]`` (numerator, then the mul's right child), matching Appendix B.
 
-The same JSON shape (``{"type", "value"?, "slots"?}``) is what ``MathNodeConverter``
-persists in Artemis, so these trees round-trip with the real platform data.
+The JSON shape (``{"type", "value"?, "slots"?}``) is a plain typed-tree any host
+can produce; it is deliberately compatible with the format the reference adopter
+(Artemis, via its ``MathNodeConverter``) persists, so these trees round-trip with
+real platform data without binding the backend to any one platform.
 """
 from __future__ import annotations
 
@@ -27,6 +29,11 @@ SLOTS: dict[str, tuple[str, ...]] = {
     "frac": ("denominator", "numerator"),
     "neg": ("inner",),
     "eq": ("left", "right"),
+    # Induction blocks (induction.py): ℕ successor and exponentiation. These are
+    # NOT in the shipped catalogue and never reach the egglog oracle / ℚ evaluator;
+    # induction is graded by the step-validator only.
+    "succ": ("inner",),
+    "pow": ("base", "exponent"),
     # 'wild' is a pattern-only block (wildcards a, b, c); see catalogue.py.
     "wild": (),
 }
@@ -109,6 +116,24 @@ def eq(left: MathNode, right: MathNode) -> MathNode:
     return MathNode("eq", kids=(left, right))
 
 
+def succ(inner: MathNode) -> MathNode:
+    return MathNode("succ", kids=(inner,))
+
+
+def power(base: MathNode, exponent: MathNode) -> MathNode:
+    return MathNode("pow", kids=(base, exponent))
+
+
+def subst_var(node: "MathNode", name: str, replacement: "MathNode") -> "MathNode":
+    """Substitute every ``variable`` named ``name`` with ``replacement`` (used to
+    instantiate an induction goal P(var) at 0 and at S(var))."""
+    if node.op == "variable" and node.value == name:
+        return replacement
+    if not node.kids:
+        return node
+    return MathNode(node.op, node.value, tuple(subst_var(k, name, replacement) for k in node.kids))
+
+
 # ---------------------------------------------------------------------------
 # JSON persistence (the MathNodeConverter shape).
 # ---------------------------------------------------------------------------
@@ -162,7 +187,45 @@ def pretty(node: MathNode) -> str:
         return f"-({pretty(i)})" if i.kids else f"-{pretty(i)}"
     if op == "eq":
         return f"{pretty(node.slot('left'))} = {pretty(node.slot('right'))}"
+    if op == "succ":
+        return f"S({pretty(node.slot('inner'))})"
+    if op == "pow":
+        below = {"add", "sub", "eq", "mul", "frac", "neg"}
+        return f"{_wrap(node.slot('base'), below)}^{_wrap(node.slot('exponent'), below)}"
     raise ValueError(f"cannot render {op}")
+
+
+# ---------------------------------------------------------------------------
+# AC normalisation (mirrors the frontend's expr.normalizeAC): flatten + sort the
+# commutative/associative chains of `+` and `·` into one canonical tree, so two
+# expressions equal up to associativity/commutativity normalise identically.
+# Used only when an exercise sets `options.ac_normalization` -- it never affects
+# step validation, only "is this the target form / are these equal up to AC".
+# ---------------------------------------------------------------------------
+def _struct_key(node: "MathNode") -> str:
+    return f"{node.op}|{node.value or ''}(" + ",".join(_struct_key(k) for k in node.kids) + ")"
+
+
+def ac_normalize(node: "MathNode") -> "MathNode":
+    kids = tuple(ac_normalize(k) for k in node.kids)
+    node = MathNode(node.op, node.value, kids)
+    if node.op in ("add", "mul"):
+        parts: list[MathNode] = []
+
+        def collect(n: MathNode) -> None:
+            if n.op == node.op:
+                for k in n.kids:
+                    collect(k)
+            else:
+                parts.append(n)
+
+        collect(node)
+        parts.sort(key=_struct_key)
+        acc = parts[0]
+        for p in parts[1:]:                       # rebuild as a left-nested chain
+            acc = MathNode(node.op, None, (acc, p))
+        return acc
+    return node
 
 
 # ---------------------------------------------------------------------------

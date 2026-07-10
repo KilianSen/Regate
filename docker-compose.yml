@@ -22,3 +22,28 @@ services:
       interval: 10s
       timeout: 3s
       retries: 5
+
+  coqregate:
+    build:
+      context: .
+      dockerfile: backends/coqregate/Dockerfile
+    ports: ["8002:8000"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  cvc5regate:
+    build:
+      context: .
+      dockerfile: backends/cvc5regate/Dockerfile
+    # The Dockerfile fetches the x86_64 static cvc5 binary; pin the platform so it
+    # also works on arm64 hosts (Apple Silicon) under emulation. Native on amd64 CI.
+    platform: linux/amd64
+    ports: ["8003:8000"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 3s
+      retries: 5

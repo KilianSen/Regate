@@ -1,0 +1,307 @@
+{
+  "name": "19-induction-valid",
+  "request": {
+    "protocol": "1.0",
+    "exercise": {
+      "mode": "induction",
+      "goal": {
+        "type": "eq",
+        "slots": {
+          "left": [
+            {
+              "type": "pow",
+              "slots": {
+                "base": [
+                  {
+                    "type": "number",
+                    "value": "1"
+                  }
+                ],
+                "exponent": [
+                  {
+                    "type": "variable",
+                    "value": "n"
+                  }
+                ]
+              }
+            }
+          ],
+          "right": [
+            {
+              "type": "number",
+              "value": "1"
+            }
+          ]
+        }
+      },
+      "inductionVar": "n",
+      "rules": [
+        "mul_one_left"
+      ],
+      "definitions": [
+        {
+          "id": "pow_zero",
+          "owner": "pow",
+          "lhs": {
+            "type": "pow",
+            "slots": {
+              "base": [
+                {
+                  "type": "wild",
+                  "value": "a"
+                }
+              ],
+              "exponent": [
+                {
+                  "type": "number",
+                  "value": "0"
+                }
+              ]
+            }
+          },
+          "rhs": {
+            "type": "number",
+            "value": "1"
+          },
+          "bidirectional": false,
+          "conditions": []
+        },
+        {
+          "id": "pow_succ",
+          "owner": "pow",
+          "lhs": {
+            "type": "pow",
+            "slots": {
+              "base": [
+                {
+                  "type": "wild",
+                  "value": "a"
+                }
+              ],
+              "exponent": [
+                {
+                  "type": "succ",
+                  "slots": {
+                    "inner": [
+                      {
+                        "type": "wild",
+                        "value": "n"
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          },
+          "rhs": {
+            "type": "mul",
+            "slots": {
+              "left": [
+                {
+                  "type": "wild",
+                  "value": "a"
+                }
+              ],
+              "right": [
+                {
+                  "type": "pow",
+                  "slots": {
+                    "base": [
+                      {
+                        "type": "wild",
+                        "value": "a"
+                      }
+                    ],
+                    "exponent": [
+                      {
+                        "type": "wild",
+                        "value": "n"
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          },
+          "bidirectional": false,
+          "conditions": []
+        }
+      ]
+    },
+    "submission": {
+      "base": {
+        "steps": [
+          {
+            "rule": "pow_zero",
+            "path": [
+              0
+            ],
+            "result": {
+              "type": "eq",
+              "slots": {
+                "left": [
+                  {
+                    "type": "number",
+                    "value": "1"
+                  }
+                ],
+                "right": [
+                  {
+                    "type": "number",
+                    "value": "1"
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "step": {
+        "steps": [
+          {
+            "rule": "pow_succ",
+            "path": [
+              0
+            ],
+            "result": {
+              "type": "eq",
+              "slots": {
+                "left": [
+                  {
+                    "type": "mul",
+                    "slots": {
+                      "left": [
+                        {
+                          "type": "number",
+                          "value": "1"
+                        }
+                      ],
+                      "right": [
+                        {
+                          "type": "pow",
+                          "slots": {
+                            "base": [
+                              {
+                                "type": "number",
+                                "value": "1"
+                              }
+                            ],
+                            "exponent": [
+                              {
+                                "type": "variable",
+                                "value": "n"
+                              }
+                            ]
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ],
+                "right": [
+                  {
+                    "type": "number",
+                    "value": "1"
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "kind": "B",
+            "path": [
+              0,
+              1
+            ],
+            "equation": [
+              {
+                "type": "pow",
+                "slots": {
+                  "base": [
+                    {
+                      "type": "number",
+                      "value": "1"
+                    }
+                  ],
+                  "exponent": [
+                    {
+                      "type": "variable",
+                      "value": "n"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "number",
+                "value": "1"
+              }
+            ],
+            "result": {
+              "type": "eq",
+              "slots": {
+                "left": [
+                  {
+                    "type": "mul",
+                    "slots": {
+                      "left": [
+                        {
+                          "type": "number",
+                          "value": "1"
+                        }
+                      ],
+                      "right": [
+                        {
+                          "type": "number",
+                          "value": "1"
+                        }
+                      ]
+                    }
+                  }
+                ],
+                "right": [
+                  {
+                    "type": "number",
+                    "value": "1"
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "rule": "mul_one_left",
+            "path": [
+              0
+            ],
+            "result": {
+              "type": "eq",
+              "slots": {
+                "left": [
+                  {
+                    "type": "number",
+                    "value": "1"
+                  }
+                ],
+                "right": [
+                  {
+                    "type": "number",
+                    "value": "1"
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      }
+    }
+  },
+  "expect": {
+    "eggregate": {
+      "outcome": "equal_no_certificate",
+      "score": null
+    },
+    "leanregate": {
+      "outcome": "unknown",
+      "score": null
+    }
+  }
+}

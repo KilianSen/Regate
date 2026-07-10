@@ -1,34 +1,3 @@
-"""Runtime Lean prover for Leanregate custom rulesets.
-
-The scaffold rejected inline `exercise.ruleset`s outright: a formal backend may
-only grade with rules it has a proof for, and the scaffold had no way to prove a
-rule that arrived on the wire. This module lifts that restriction for *trusted*
-authors (instructors, not students) by **establishing soundness at request time**
-with a real Lean kernel running in the container.
-
-Per rule, hybrid:
-
-  1. *auto-prove* — translate the MathNode `lhs`/`rhs` (+ `conditions` as
-     hypotheses) into a rational-identity goal over ℚ and discharge it with
-     `field_simp [hyps]; ring`. The whole catalogue lives in this fragment, so a
-     sound rule proves itself and an unsound one (a missing `≠ 0` guard, say) is
-     *rejected* — Lean cannot prove a false identity.
-  2. *proof-carrying* — if auto-prove fails and the rule ships a `proof` tactic
-     block, elaborate and kernel-check that instead (covers rules outside the
-     ring/field fragment, e.g. relational rewrites).
-
-A rule Lean accepts becomes a `ProvenRule` for this request (see
-`lean_check.proven_from_custom`); one it rejects, or one that needs a tactic
-outside the fragment with no supplied proof, is left UNPROVEN — derivations using
-it grade `unknown`, never a false grade. That asymmetry is the same honesty the
-scaffold had, now extended to dynamically-supplied rules.
-
-Lean runs in-process via `lake env lean` on a generated file inside a prebuilt
-Mathlib project (`LEANREGATE_LEAN_PROJECT`). If the toolchain is absent the
-prover reports `unavailable` and `grade.py` degrades to the built-in catalogue.
-
-stdlib-only; shares no code with Eggregate — only the protocol.
-"""
 from __future__ import annotations
 
 import hashlib
@@ -41,7 +10,11 @@ from dataclasses import dataclass, field
 # Where the prebuilt lake project (with Mathlib oleans) lives in the container.
 # The Dockerfile populates it; unset/missing ⇒ Lean is unavailable.
 LEAN_PROJECT = os.environ.get("LEANREGATE_LEAN_PROJECT", "/app/leanproj")
-LEAN_TIMEOUT = float(os.environ.get("LEANREGATE_LEAN_TIMEOUT", "60"))
+# Cold-loading the Mathlib tactic olean set on the first request takes ~85s in a
+# fresh container (no persistent Lean server; page cache is empty). The default
+# must clear that or every first request times out → `unknown`. Override with
+# LEANREGATE_LEAN_TIMEOUT; warm requests are fast once the page cache is hot.
+LEAN_TIMEOUT = float(os.environ.get("LEANREGATE_LEAN_TIMEOUT", "180"))
 
 
 # ---------------------------------------------------------------------------
@@ -170,30 +143,48 @@ def _auto_source(rule: dict) -> str:
     )
 
 
-def _carried_source(rule: dict) -> str:
-    """A Lean file that states the rule and discharges it with the supplied proof."""
-    sig, _ = _goal(rule)
-    proof = rule["proof"].rstrip("\n")
-    indented = "\n".join("  " + line for line in proof.splitlines())
-    return (
-        "import Mathlib\n\n"
-        f"theorem {THEOREM} : {sig} := by\n"
-        f"{indented}\n"
-    )
-
-
 # ---------------------------------------------------------------------------
 # Lean invocation (the mock seam — the only thing that touches the toolchain).
 # ---------------------------------------------------------------------------
+# The Dockerfile bakes `lake env`'s LEAN_PATH/LD_LIBRARY_PATH into this file so the
+# runtime can invoke `lean` directly. We MUST NOT call `lake` at runtime: `lake env`
+# re-resolves dependencies and, if a package's git checkout looks off, deletes and
+# re-clones it from GitHub — wiping the prebuilt oleans and needing network. Calling
+# `lean` with the captured env sidesteps lake entirely (and is far faster: no
+# workspace resolution). Absent the file (dev/source checkout) we fall back to lake.
+LEAN_ENV_FILE = os.path.join(LEAN_PROJECT, ".lean_env")
+
+
+def _baked_env() -> dict[str, str] | None:
+    if not os.path.isfile(LEAN_ENV_FILE):
+        return None
+    env: dict[str, str] = {}
+    with open(LEAN_ENV_FILE, encoding="utf-8") as fh:
+        for line in fh:
+            line = line.rstrip("\n")
+            if "=" in line:
+                k, v = line.split("=", 1)
+                if v:
+                    env[k] = v
+    return env or None
+
+
+def _lean_direct_ok() -> bool:
+    return _baked_env() is not None and shutil.which("lean") is not None
+
+
 def lean_available() -> bool:
-    return shutil.which("lake") is not None and os.path.isdir(LEAN_PROJECT)
+    if not os.path.isdir(LEAN_PROJECT):
+        return False
+    return _lean_direct_ok() or shutil.which("lake") is not None
 
 
 def _run_lean(body: str) -> tuple[bool, str]:
     """Elaborate `body` in the prebuilt Mathlib project. (True, "") on success;
     (False, diagnostics) on a Lean error, missing toolchain, or timeout.
 
-    Isolated so tests can stub it without a Lean install."""
+    Prefers a direct `lean` call with the baked env (no lake); falls back to
+    `lake env lean`. Isolated so tests can stub it without a Lean install."""
     if not lean_available():
         return False, "lean toolchain unavailable"
     src_dir = os.path.join(LEAN_PROJECT, "Regate")
@@ -201,10 +192,16 @@ def _run_lean(body: str) -> tuple[bool, str]:
     src = os.path.join(src_dir, "Check.lean")
     with open(src, "w", encoding="utf-8") as fh:
         fh.write(body)
+    rel = os.path.relpath(src, LEAN_PROJECT)
+    baked = _baked_env()
+    if baked is not None and shutil.which("lean") is not None:
+        cmd, env = ["lean", rel], {**os.environ, **baked}
+    else:
+        cmd, env = ["lake", "env", "lean", rel], None
     try:
         proc = subprocess.run(
-            ["lake", "env", "lean", os.path.relpath(src, LEAN_PROJECT)],
-            cwd=LEAN_PROJECT, capture_output=True, text=True, timeout=LEAN_TIMEOUT,
+            cmd, cwd=LEAN_PROJECT, capture_output=True, text=True,
+            timeout=LEAN_TIMEOUT, env=env,
         )
     except subprocess.TimeoutExpired:
         return False, f"lean timed out after {LEAN_TIMEOUT}s"
@@ -220,7 +217,7 @@ def _run_lean(body: str) -> tuple[bool, str]:
 class ProofResult:
     rule_id: str
     proven: bool
-    method: str        # "ring" | "proof" | "rejected" | "unavailable" | "untranslatable"
+    method: str        # "ring" | "rejected" | "unavailable" | "untranslatable"
     lemma: str         # the Lean theorem name when proven, else ""
     detail: str = ""   # Lean diagnostics when rejected
 
@@ -231,7 +228,7 @@ _CACHE: dict[str, ProofResult] = {}
 def _cache_key(rule: dict) -> str:
     # Content-addressed: same rule body ⇒ same proof outcome. Drop cosmetic id so
     # two ids for the same identity share a result.
-    canon = {k: rule.get(k) for k in ("lhs", "rhs", "conditions", "proof")}
+    canon = {k: rule.get(k) for k in ("lhs", "rhs", "conditions")}
     return hashlib.sha256(json.dumps(canon, sort_keys=True).encode()).hexdigest()
 
 
@@ -257,13 +254,9 @@ def prove_rule(rule: dict) -> ProofResult:
             return _store(key, ProofResult(rid, True, "ring", THEOREM))
         auto_detail = detail
 
-    # 2) proof-carrying fallback.
-    if rule.get("proof"):
-        ok, detail = _run_lean(_carried_source(rule))
-        if ok:
-            return _store(key, ProofResult(rid, True, "proof", THEOREM))
-        return _store(key, ProofResult(rid, False, "rejected", "", detail))
-
+    # A rule outside the automatic fragment is simply unproven. Regate does not run
+    # a caller-supplied proof script (an injection surface; rule soundness is the
+    # caller's upstream responsibility), so a `proof` field on the rule is ignored.
     return _store(key, ProofResult(rid, False, "rejected", "", auto_detail))
 
 

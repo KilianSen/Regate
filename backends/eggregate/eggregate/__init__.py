@@ -1,14 +1,18 @@
-"""Eggregate -- an e-graph reasoning backend (MS3) for the Artemis equational
-reasoning exercise type, built on egglog equality saturation.
+"""Eggregate -- a pluggable e-graph reasoning backend for grading equational
+reasoning in learning platforms, built on egglog equality saturation.
 
-See the bachelor's thesis "Extending Artemis with proof based mathematical
-exercises" (main.pdf), Section 4.5 / 5.7 and Appendix B.
+It speaks the language-agnostic grading contract (GRADING_PROTOCOL.md), so any
+host platform integrates against the contract, not this package. Originated as a
+bachelor's thesis extending Artemis ("Extending Artemis with proof based
+mathematical exercises", Section 4.5 / 5.7 and Appendix B); Artemis is the
+reference adopter, not a dependency.
 """
 from .model import (
-    MathNode, add, distance, eq, frac, from_json, mul, neg, num, pretty, sub,
-    to_json, var,
+    MathNode, add, ac_normalize, distance, eq, frac, from_json, mul, neg, num,
+    pretty, sub, to_json, var,
 )
-from .catalogue import CATALOGUE, Rule, rules
+from .catalogue import CATALOGUE, rules
+from .rule import Rule
 from .conditions import Assumption, SideCondition, discharge
 from .matching import instantiate, match
 from .backend import EGraphView, equivalent, grade, build_ruleset
@@ -33,7 +37,7 @@ from .validate import (
 
 __all__ = [
     "MathNode", "add", "sub", "mul", "frac", "neg", "eq", "num", "var",
-    "pretty", "distance", "to_json", "from_json",
+    "pretty", "distance", "ac_normalize", "to_json", "from_json",
     "CATALOGUE", "Rule", "rules",
     "Assumption", "SideCondition", "discharge", "match", "instantiate",
     "EGraphView", "equivalent", "grade", "build_ruleset",
