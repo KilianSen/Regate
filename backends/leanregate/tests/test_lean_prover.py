@@ -138,6 +138,24 @@ def test_grade_unknown_when_lean_unavailable():
     assert resp["outcome"] == "unknown"
 
 
+def test_carried_proof_injection_is_refused():
+    # A carried Lean proof that closes the goal with `sorry`/`admit` and opens a
+    # decoy declaration must be refused before it reaches `lean` — else a false rule
+    # is 'proven'. `sorry` is the critical case: it needs no Admitted to close.
+    for p in ["sorry",
+              "admit",
+              "ring\ntheorem evil : (0:Q) = 1 := by sorry",
+              "ring\nexample : True := trivial",
+              "-- theorem sneak\nring",
+              "/- sorry -/ ring"]:
+        try:
+            lean_prover._sanitize_lean_tactic(p)
+            assert False, f"sanitizer let through: {p!r}"
+        except lean_prover.TranslationError:
+            pass
+    assert lean_prover._sanitize_lean_tactic("field_simp; ring") == "field_simp; ring"
+
+
 def _run_all():
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     for fn in fns:

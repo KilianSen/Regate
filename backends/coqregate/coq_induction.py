@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import re
 from dataclasses import dataclass
 
 import coq_prover  # reuse the kernel seam: check_source, coq_available, caching
@@ -292,7 +293,7 @@ def build_rule_source(rule: dict, definitions: list[dict] | None = None,
 
     forall = f"forall {binders}, " if binders else ""
     auto = "first [ ring | simpl; ring | field | (field; lia) | (simpl; field) ]"
-    body = tactic if tactic is not None else auto
+    body = _sanitize_tactic(tactic) if tactic is not None else auto
     return (
         "From Coq Require Import QArith.\n"
         "From Coq Require Import Arith.\n"
@@ -311,6 +312,37 @@ def _mentions_pow(node: dict) -> bool:
         return True
     return any(_mentions_pow(ch)
                for children in (node.get("slots") or {}).values() for ch in children)
+
+
+# A carried proof is an untrusted string spliced into the Coq file inside the one
+# `Theorem regate_rule … Qed.` frame. On its own that frame can only exit 0 by
+# actually proving regate_rule. The escape is a proof that ABANDONS the real goal
+# (Admitted/Abort/Qed/Defined) and then states a decoy it *can* prove
+# (Theorem/Lemma/Definition/…), or hides one in a comment. Deny those tokens and a
+# false rule can no longer be smuggled past `coqc`.
+_FORBIDDEN_TACTIC = re.compile(
+    r"\(\*|"                                   # comment open (could hide anything)
+    r"\b(?:Qed|Defined|Admitted|Abort|admit|give_up|sorry|"
+    r"Theorem|Lemma|Example|Remark|Corollary|Proposition|Fact|"
+    r"Definition|Fixpoint|CoFixpoint|Axiom|Axioms|Conjecture|Parameter|Parameters|"
+    r"Hypothesis|Hypotheses|Variable|Variables|Context|"
+    r"Ltac|Notation|Tactic|Instance|Class|Record|Inductive|Module|Section|"
+    r"Require|Import|Export|Open|Declare|Set|Unset|Add)\b",
+    re.IGNORECASE)
+
+
+def _sanitize_tactic(tactic: str) -> str:
+    """Reject a carried proof that could break out of its theorem frame.
+
+    A legitimate rule proof is a tactic script (`intros; ring`, `field; lia`, …).
+    Anything that could close the proof early, open a declaration, or start a
+    comment is refused, so a carried proof can only ever *discharge the stated
+    rule*, never introduce a decoy theorem that makes an unsound rule 'proven'.
+    """
+    if _FORBIDDEN_TACTIC.search(tactic):
+        raise InductionError("carried proof contains a disallowed command "
+                             "(only tactic scripts are accepted)")
+    return tactic
 
 
 _RULE_CACHE: dict[str, ProvenRule] = {}
@@ -335,7 +367,17 @@ def prove_rule(rule: dict, definitions: list[dict] | None = None) -> ProvenRule:
     try:
         source = build_rule_source(rule, definitions, tactic=carried or None)
     except InductionError as e:
-        return ProvenRule(rid, False, "untranslatable", str(e))
+        if carried:
+            # A malformed/hostile carried proof (rejected by _sanitize_tactic) must
+            # not be trusted, but must also not fail a rule that is sound on its own
+            # merits — fall through to auto-proof, exactly as a stale proof does.
+            try:
+                source = build_rule_source(rule, definitions)
+                carried = None
+            except InductionError as e2:
+                return ProvenRule(rid, False, "untranslatable", str(e2))
+        else:
+            return ProvenRule(rid, False, "untranslatable", str(e))
 
     key = hashlib.sha256(source.encode()).hexdigest()
     if key in _RULE_CACHE:

@@ -154,7 +154,7 @@ def check_step(state: dict, step: dict, rules: dict[str, ProvenRule] | None = No
     path = tuple(step.get("path", []))
     try:
         sub = at(state, path)
-    except (IndexError, KeyError):
+    except (IndexError, KeyError, TypeError):
         return StepCheck("invalid", None, f"path {list(path)} is not in the expression")
     env = match(pattern, sub, {})
     if env is None:
@@ -263,7 +263,7 @@ def _check_case(source: dict, steps: list[dict], rules: dict[str, ProvenRule],
             path = tuple(step.get("path", []))
             try:
                 target = at(state, path)
-            except (IndexError, KeyError):
+            except (IndexError, KeyError, TypeError):
                 r = f"path {list(path)} is not in the expression"
                 steps_out.append({"index": i, "status": "invalid", "reason": r})
                 return DerivationReport("invalid", None, steps_out, i, r)

@@ -2,9 +2,11 @@
 
 A language-agnostic JSON contract for grading a student's equational-reasoning
 submission. Any backend that speaks it is a drop-in grader for Artemis; today
-**Eggregate** (Python / e-graph) and **Leanregate** (Lean / formal) both
+**eggregate** (Python / e-graph), **leanregate** (Lean / formal), **coqregate**
+(Rocq/Coq, induction only) and **cvc5regate** (cvc5 SMT, induction only) all
 implement it, so they can be deployed as interchangeable OCI containers and
-selected per exercise.
+selected per exercise. The two induction certifiers answer non-induction modes
+with `unknown` (out of scope), so "interchangeable" holds within a mode.
 
 Transport is deliberately unspecified — a conforming backend exposes **both**:
 
@@ -185,7 +187,7 @@ has, and it answers `unknown` for a rule it cannot prove regardless of
 ```jsonc
 {
   "protocol": "1.0",
-  "backend": "eggregate" | "leanregate",
+  "backend": "eggregate" | "leanregate" | "coqregate" | "cvc5regate",
   "backend_version": "string",
   "outcome": "proven_equal"        // certified equivalent (proof attached)
            | "proven_unequal"      // a counterexample/disproof exists (witness)
@@ -194,11 +196,22 @@ has, and it answers `unknown` for a rule it cannot prove regardless of
            | "unknown",            // neither proof nor disproof within budget
   "score": 0..100 | null,          // null = inconclusive -> route to review
   "certified": true | false,       // is the verdict backed by a re-checked proof?
+
+  // `proof` is a re-checkable certificate; its SHAPE is backend-specific. Eggregate
+  // emits the rewrite chain below. A formal backend attaches the artifact it ran:
+  //   coq/lean  { "engine","method","theorem","source": "<accepted source text>" }
+  //   cvc5      { "engine","method","smtlib": "<problem>","expect": "unsat" }
+  // An empty array [] is a valid zero-step certificate; null means "not certified".
   "proof":   [ { "rule","path","direction","state": <MathNode> } ] | null,
   "witness": { "x": "0", ... } | null,            // counterexample (proven_unequal)
   "steps":   [ { "index": 0, "status": "valid"|"open"|"invalid", "reason": "" } ] | null,
   "hint":    { "rule","path","direction","remaining": 2 } | null,
   "feedback": "human-readable string",
+
+  // `meta` is free-form diagnostics. Common keys: `ms`. Eggregate: `saturated`,
+  // `progress`. Induction backends: `induction` {var,status/submission,reason},
+  // `ruleset` {id: {proven,method,detail}} (per-rule verify status), and
+  // cvc5's `rechecked` (was the certificate independently re-checked).
   "meta": { "ms": 12, "saturated": false, "progress": 0.67 }
 }
 ```

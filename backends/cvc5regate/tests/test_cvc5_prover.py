@@ -247,6 +247,22 @@ def test_false_goal_returns_proven_unequal_with_witness():
     assert resp["witness"] == {"n": "0"}            # protocol: a witness is mandatory here
 
 
+def test_false_goal_is_refuted_before_a_garbage_derivation():
+    # The POINT of disprove-first: a false goal is refuted even when the student's
+    # steps are nonsense, because the disprove pass runs BEFORE step grading. This
+    # pins the ordering — remove the disprove-first block and a garbage derivation
+    # of a false goal becomes `invalid_derivation` instead of `proven_unequal`.
+    def respond(src, args):
+        if "--fmf-fun" in args:
+            return ("sat", "sat\n(((val n) 0))")    # the goal is false at n = 0
+        return ("unsat", "")
+    _install(respond)
+    garbage = [{"rule": "pow_zero", "path": [0],
+                "result": eq(num(9), num(9))}]       # claimed result is not what pow_zero yields
+    resp = grade.grade(_ind_req(_sub(garbage, garbage)))
+    assert resp["outcome"] == "proven_unequal" and resp["witness"] == {"n": "0"}
+
+
 def test_grade_induction_invalid_wrong_result():
     _install(lambda s, a: ("unsat", ""))            # symbolic rejects before any backstop
     bad = [dict(VALID_BASE[0], result=eq(num(1), num(2)))]   # pow_zero gives 1=1, not 1=2

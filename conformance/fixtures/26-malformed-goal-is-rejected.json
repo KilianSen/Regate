@@ -1,0 +1,38 @@
+{
+  "name": "26-malformed-goal-is-rejected",
+  "description": "A malformed induction goal (an `eq` node with no `slots`) must be rejected as a bad request, never crash the backend or produce a grade. Pins the protocol invariant 'malformed MathNodes -> 400 / exit 2 with {error}' across all four backends \u2014 it previously held only for eggregate, while cvc5regate crashed with an uncaught KeyError (exit 1 / 500).",
+  "request": {
+    "protocol": "1.0",
+    "exercise": {
+      "mode": "induction",
+      "goal": {
+        "type": "eq"
+      },
+      "inductionVar": "n",
+      "ruleset": [],
+      "definitions": []
+    },
+    "submission": {
+      "base": {
+        "steps": []
+      },
+      "step": {
+        "steps": []
+      }
+    }
+  },
+  "expect": {
+    "eggregate": {
+      "error": true
+    },
+    "leanregate": {
+      "error": true
+    },
+    "coqregate": {
+      "error": true
+    },
+    "cvc5regate": {
+      "error": true
+    }
+  }
+}

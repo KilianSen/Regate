@@ -258,7 +258,7 @@ def _check_step(state: dict, step: dict, rules: dict[str, Rule], ac: tuple) -> t
     path = tuple(step.get("path", []))
     try:
         sub = at(state, path)
-    except (IndexError, KeyError):
+    except (IndexError, KeyError, TypeError):
         return ("invalid", None, f"path {list(path)} is not in the expression")
     env = _match(pattern, sub, {}, ac)
     if env is None:
@@ -290,7 +290,7 @@ def check_case(source: dict, steps: list[dict], rules: dict[str, Rule],
             path = tuple(step.get("path", []))
             try:
                 target = at(state, path)
-            except (IndexError, KeyError):
+            except (IndexError, KeyError, TypeError):
                 return CaseReport("invalid", None, f"step {i}: path {list(path)} is not in the expression")
             if not ac_equal(target, ih[0], ac):
                 return CaseReport("invalid", None, f"step {i}: the substituted subterm is not the IH's LHS")

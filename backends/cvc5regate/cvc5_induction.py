@@ -622,9 +622,10 @@ def grade_derivation(ex: dict, sub: dict) -> GradeResult:
                            "every step is an instance of a cvc5-proven rule, and cvc5 certifies "
                            "the induction",
                            smtlib=smtlib, ruleset=ruleset_meta)
-    if cert.outcome == "proven_unequal" and cert.witness:
-        return GradeResult("refuted", "cvc5 found a counterexample to the goal",
-                           witness=cert.witness, ruleset=ruleset_meta)
+    # A `proven_unequal` cannot occur here: `certify(ex)` is cached, and the
+    # disprove-first block at the top of this function already returned `refuted`
+    # for any refutable goal. So the only remaining outcome is "cvc5 could not
+    # certify within budget" -> uncertifiable (route to review).
     return GradeResult("uncertifiable",
                        f"derivation steps are valid but cvc5 did not certify the goal ({cert.method})",
                        ruleset=ruleset_meta)

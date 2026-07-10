@@ -16,6 +16,38 @@ class RequestError(ValueError):
     pass
 
 
+_LEAF_TYPES = {"number", "variable", "wild"}
+
+
+def _validate_node(node, where: str, depth: int = 0) -> None:
+    """Structurally validate a MathNode so a malformed one is a 400, not a crash.
+
+    The induction translator dereferences slots by name (`s["left"][0]`); a goal
+    without them would raise an uncaught KeyError. This enforces the shape up front
+    — leaves carry a `value`, everything else a `slots` dict of child lists — and
+    caps depth so a pathological tree cannot overflow the stack.
+    """
+    if depth > 200:
+        raise RequestError(f"{where}: expression nested too deeply")
+    if not isinstance(node, dict):
+        raise RequestError(f"{where}: expected a MathNode object")
+    t = node.get("type")
+    if not isinstance(t, str):
+        raise RequestError(f"{where}: MathNode is missing a string 'type'")
+    if t in _LEAF_TYPES:
+        if "value" not in node:
+            raise RequestError(f"{where}: {t} node needs a 'value'")
+        return
+    slots = node.get("slots")
+    if not isinstance(slots, dict):
+        raise RequestError(f"{where}: {t!r} node needs a 'slots' object")
+    for name, kids in slots.items():
+        if not isinstance(kids, list):
+            raise RequestError(f"{where}: slot {name!r} must be a list")
+        for k in kids:
+            _validate_node(k, where, depth + 1)
+
+
 def _envelope(outcome, score, certified, **extra):
     base = {"protocol": PROTOCOL, "backend": BACKEND, "backend_version": VERSION,
             "outcome": outcome, "score": score, "certified": certified,
@@ -40,6 +72,9 @@ def grade(request: dict) -> dict:
     # "is this exercise certifiable?" oracle, but never stands in as a grade.)
     if ex.get("mode") == "induction":
         sub = request.get("submission") or {}
+        if not ex.get("goal"):
+            raise RequestError("induction mode requires exercise.goal")
+        _validate_node(ex["goal"], "exercise.goal")
         res = coq_induction.grade_derivation(ex, sub)
         meta = {"induction": {"var": ex.get("inductionVar"),
                               "status": res.status, "reason": res.reason}}
