@@ -193,17 +193,32 @@ class Rule:
     rhs: dict
     bidir: bool = False
     guarded: bool = False
+    # Has cvc5 proven this rule for *this request*? Transmitted rules are untrusted
+    # exercise data: applying one correctly proves nothing if the rule itself is
+    # false. Recursive `definitions` are definitional, hence trusted.
+    proven: bool = False
 
 
-def build_rules(ex: dict) -> dict[str, Rule]:
-    """`exercise.ruleset` (catalogue rules, inline) + `exercise.definitions`
-    (recursive defs) as a single id→Rule table for matching."""
+def build_rules(ex: dict, proven_ids: set[str]) -> dict[str, Rule]:
+    """`exercise.ruleset` (transmitted rules, inline) + `exercise.definitions`
+    (recursive defs) as a single id→Rule table for matching.
+
+    ``proven_ids`` are the ruleset ids cvc5 proved for this request; a rule outside
+    that set is present (so we can name it) but not usable to certify.
+    """
     rules: dict[str, Rule] = {}
-    for src in list(ex.get("ruleset") or []) + list(ex.get("definitions") or []):
+    for src in ex.get("ruleset") or []:
         rid, lhs, rhs = src.get("id"), src.get("lhs"), src.get("rhs")
         if rid and lhs and rhs:
             rules[str(rid)] = Rule(str(rid), lhs, rhs,
-                                   bool(src.get("bidirectional")), bool(src.get("conditions")))
+                                   bool(src.get("bidirectional")), bool(src.get("conditions")),
+                                   proven=str(rid) in proven_ids)
+    for src in ex.get("definitions") or []:
+        rid, lhs, rhs = src.get("id"), src.get("lhs"), src.get("rhs")
+        if rid and lhs and rhs:
+            rules[str(rid)] = Rule(str(rid), lhs, rhs,
+                                   bool(src.get("bidirectional")), bool(src.get("conditions")),
+                                   proven=True)
     return rules
 
 
@@ -228,6 +243,13 @@ def _check_step(state: dict, step: dict, rules: dict[str, Rule], ac: tuple) -> t
     rule = rules.get(rid)
     if rule is None:
         return ("uncertifiable", None, f"unknown rule {rid!r} (not in the transmitted ruleset/definitions)")
+    if not rule.proven:
+        # Correctly applying a false rule proves nothing. cvc5 certifies the *goal*,
+        # not the ruleset, so an unproven rule can never be composed into a certified
+        # verdict — it is honestly inconclusive, not a wrong answer.
+        return ("uncertifiable", None,
+                f"{rid} is not proven by cvc5 for this request; a step citing an "
+                f"unproven rule cannot be certified")
     reverse = step.get("direction") == "reverse"
     if reverse and not rule.bidir:
         return ("invalid", None, f"{rid} is forward-only; cannot apply in reverse")

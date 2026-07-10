@@ -55,7 +55,14 @@ Expressions use the persisted **MathNode** JSON shape (Artemis
     // is what keeps "substitute equals for equals" sound.
     "hypotheses": [ <eq MathNode>, ... ],
 
+    // partial_credit (default true): award a value-equivalent but unsimplified
+    //   answer a distance-based score in 1..99 instead of a binary 0/100.
+    // bound (default 5): the starting saturation bound for equivalence search.
+    // ac_normalization (default false): treat +/· as associative-commutative when
+    //   deciding equivalence and "reached the target form" — never for step
+    //   legality, where a derivation must still cite the rule it used.
     "options": { "partial_credit": true, "bound": 5, "want_hint": false,
+                 "ac_normalization": false,
                  "audit_rules": false, "audit_trials": 400 }
   },
   "submission": {
@@ -128,7 +135,17 @@ contain **wildcards** — `{"type":"wild","value":"a"}` — matching any subtree
 ruleset for soundness (Eggregate: `options.audit_rules` runs the random-rational
 fuzzer and rejects any rule that is not a definedness-preserving equality, with a
 counterexample). Authoring-time auditing is preferred; per-request is the safety
-net. A formal backend (Leanregate) requires a proof per custom rule.
+net.
+
+**Every formal backend MUST prove each transmitted rule before certifying with
+it.** This is not optional, and it is not implied by kernel-checking the goal: a
+kernel that certifies only `∀n. 1ⁿ = 1` will happily certify a derivation whose
+step cites the false rule `a·b = b`, correctly applied. Applying a false rule
+correctly proves nothing. A rule the kernel cannot prove — including a *guarded*
+rule, whose side condition the formal backends do not model — is **unproven, not
+false**: a step citing it grades `unknown` (route to review), never
+`invalid_derivation`. Recursive `definitions` are definitional and therefore
+trusted; algebraic rules are not.
 
 ## GradeResponse
 
@@ -142,7 +159,7 @@ net. A formal backend (Leanregate) requires a proof per custom rule.
            | "equal_no_certificate"// believed equal, no checked proof produced
            | "invalid_derivation"  // a submitted step is not a valid rule application
            | "unknown",            // neither proof nor disproof within budget
-  "score": 100 | 0 | null,         // null = inconclusive -> route to review
+  "score": 0..100 | null,          // null = inconclusive -> route to review
   "certified": true | false,       // is the verdict backed by a re-checked proof?
   "proof":   [ { "rule","path","direction","state": <MathNode> } ] | null,
   "witness": { "x": "0", ... } | null,            // counterexample (proven_unequal)
@@ -158,9 +175,17 @@ net. A formal backend (Leanregate) requires a proof per custom rule.
 - **`score` may be `null`.** `equal_no_certificate` and `unknown` are *not*
   zeros — the grader is honestly inconclusive; the caller routes to review. This
   is the false-negative defence and every backend must honour it.
+- **`outcome` is authoritative; `score` is the mark.** With `partial_credit` on,
+  a `score` in `1..99` means "provably equivalent, not yet in the required form".
+  A `score` of `0` alongside `outcome: proven_equal` means equivalent but *no
+  measurable progress* toward the target form — it is **not** the same as
+  `proven_unequal`, and a caller must not conflate them by reading `score` alone.
 - **`certified` distinguishes a checked proof from a bare yes.** `proven_equal`
   must carry a `proof` that the backend (or Artemis) can re-verify; a backend
-  that can only assert equivalence returns `equal_no_certificate`.
+  that can only assert equivalence returns `equal_no_certificate`. An *empty*
+  `proof` (`[]`) is a valid zero-step certificate ("already the target form");
+  `null` is not. The formal backends attach the engine artifact they ran — the
+  accepted Lean/Coq source, or the SMT-LIB problem plus the expected verdict.
 - **`proven_unequal` must carry a `witness`** (or, for a formal backend, a
   refutation) — never returned on a mere failure to find a proof.
 - Unknown rule ids, malformed MathNodes, or a missing `target` in transformation

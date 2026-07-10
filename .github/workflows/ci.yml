@@ -22,6 +22,11 @@ jobs:
       - uses: actions/setup-python@v5
         with: { python-version: "3.13" }
       - run: pip install -e backends/eggregate
+      # cvc5 is a ~60 MB wheel, so the conformance job can exercise a formal
+      # backend's *certified* induction path (fixture 23) rather than skipping it.
+      # coqc is not installed here — it costs minutes; the coqregate job covers it,
+      # and the unsound-rule gate (fixture 24) runs with or without a toolchain.
+      - run: pip install cvc5
       - name: protocol conformance (target backends)
         run: python conformance/run_conformance.py
 

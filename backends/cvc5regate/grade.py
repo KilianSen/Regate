@@ -61,12 +61,24 @@ def _grade_induction(ex: dict, sub: dict) -> dict:
     res = cvc5_induction.grade_derivation(ex, sub)
     meta = {"induction": {"var": ex.get("inductionVar"), "engine": "cvc5",
                           "status": res.status, "reason": res.reason}}
+    if res.ruleset is not None:
+        meta["ruleset"] = res.ruleset
     if res.status == "certified":
-        return _envelope("proven_equal", 100, True, meta=meta,
-                         proof=[{"engine": "cvc5", "method": "step-validity",
-                                 "goal": ex.get("goal"), "inductionVar": ex.get("inductionVar")}],
-                         feedback="Certified: every step of your base case and inductive step is "
-                                  "SMT-checked; ∀n. P(n) follows by induction.")
+        # `certified: true` owes the caller something re-checkable. cvc5 1.3.x cannot
+        # export an Alethe proof for an induction (skolems), so the certificate is the
+        # exact SMT-LIB the solver accepted: any SMT solver can re-run it and get the
+        # same `unsat`. Weaker than an independent kernel check — meta.rechecked says
+        # so — but reproducible rather than a bare assertion.
+        return _envelope("proven_equal", 100, True, meta={**meta, "rechecked": False},
+                         proof=[{"engine": "cvc5", "method": "quant-ind",
+                                 "smtlib": res.smtlib, "expect": "unsat"}],
+                         feedback="Certified: every step of your base case and inductive step "
+                                  "applies a cvc5-proven rule; ∀n. P(n) follows by induction. "
+                                  "The SMT-LIB problem is attached; re-run it to re-check.")
+    if res.status == "refuted":
+        return _envelope("proven_unequal", 0, True, meta=meta, witness=res.witness,
+                         feedback=f"The goal does not hold: cvc5 found a counterexample "
+                                  f"({', '.join(f'{k}={v}' for k, v in res.witness.items())}).")
     if res.status == "invalid":
         return _envelope("invalid_derivation", 0, False, meta=meta,
                          feedback=f"Invalid induction proof: {res.reason}.")

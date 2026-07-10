@@ -21,7 +21,7 @@ class InductionError(ValueError):
 # ---------------------------------------------------------------------------
 def _infer(node: dict, dom: str, env: dict[str, str]) -> None:
     t = node.get("type")
-    if t == "variable":
+    if t in ("variable", "wild"):
         name = str(node["value"])
         if env.get(name, dom) != dom:
             raise InductionError(f"variable {name!r} is used as both ℚ and ℕ")
@@ -214,6 +214,112 @@ def build_source(ex: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Proving the transmitted ruleset (rules are untrusted exercise data).
+#
+# A step that correctly applies a *false* rule proves nothing, and the induction
+# backstop certifies the goal, not the ruleset — so `1^n = 1` would certify even
+# when the student's step cited `a*b = b`. Every rule therefore gets its own Coq
+# kernel run before it may appear in a certified derivation. A rule Coq cannot
+# prove (or a guarded one, whose side condition we do not model) is simply not
+# proven: a step citing it grades `unknown`, never `invalid` and never certified.
+# ---------------------------------------------------------------------------
+RULE_THEOREM = "regate_rule"
+
+
+@dataclass
+class ProvenRule:
+    id: str
+    proven: bool
+    method: str      # "ring" | "rejected" | "guarded" | "unavailable" | "untranslatable"
+    detail: str = ""
+
+
+def build_rule_source(rule: dict, definitions: list[dict] | None = None) -> str:
+    """A standalone Coq file proving `forall vars, lhs == rhs` for one rule."""
+    lhs_node, rhs_node = rule.get("lhs"), rule.get("rhs")
+    if not lhs_node or not rhs_node:
+        raise InductionError("rule needs lhs and rhs")
+
+    env: dict[str, str] = {}
+    _infer(lhs_node, "Q", env)
+    _infer(rhs_node, "Q", env)
+
+    lhs, rhs = _term(lhs_node, "Q"), _term(rhs_node, "Q")
+    q_vars = sorted(v for v, d in env.items() if d == "Q")
+    n_vars = sorted(v for v, d in env.items() if d == "N")
+
+    binder_groups = []
+    if q_vars:
+        binder_groups.append(f"({' '.join(q_vars)} : Q)")
+    if n_vars:
+        binder_groups.append(f"({' '.join(n_vars)} : nat)")
+    binders = " ".join(binder_groups)
+    intro = " ".join(q_vars + n_vars)
+
+    # `pw` is only needed when the rule mentions `pow`; a rule that does not is
+    # provable without the definitions (and must be, since they may be absent).
+    pow_def = ""
+    if _mentions_pow(lhs_node) or _mentions_pow(rhs_node):
+        pow_def = _build_pow_def(definitions or []) + "\n"
+
+    forall = f"forall {binders}, " if binders else ""
+    return (
+        "From Coq Require Import QArith.\n"
+        "From Coq Require Import Arith.\n"
+        "From Coq Require Import Lia.\n"
+        "Open Scope Q_scope.\n\n"
+        f"{pow_def}"
+        f"Theorem {RULE_THEOREM} : {forall}{lhs} == {rhs}.\n"
+        f"Proof.\n"
+        f"  {'intros ' + intro + ';' if intro else ''} "
+        f"first [ ring | simpl; ring | field | (field; lia) | (simpl; field) ].\n"
+        f"Qed.\n"
+    )
+
+
+def _mentions_pow(node: dict) -> bool:
+    if node.get("type") == "pow":
+        return True
+    return any(_mentions_pow(ch)
+               for children in (node.get("slots") or {}).values() for ch in children)
+
+
+_RULE_CACHE: dict[str, ProvenRule] = {}
+
+
+def prove_rule(rule: dict, definitions: list[dict] | None = None) -> ProvenRule:
+    """Kernel-prove one transmitted rule. Unproven is inconclusive, not false."""
+    rid = str(rule.get("id", "?"))
+    if rule.get("conditions"):
+        # A guarded rule (`x/x = 1` needing `x != 0`) is not an unconditional
+        # equality; we do not model the side condition, so we cannot prove it.
+        return ProvenRule(rid, False, "guarded",
+                          "guarded rules are outside the certifiable fragment")
+    try:
+        source = build_rule_source(rule, definitions)
+    except InductionError as e:
+        return ProvenRule(rid, False, "untranslatable", str(e))
+
+    key = hashlib.sha256(source.encode()).hexdigest()
+    if key in _RULE_CACHE:
+        return _RULE_CACHE[key]
+    if not coq_prover.coq_available():
+        return ProvenRule(rid, False, "unavailable", "coq toolchain unavailable")
+
+    ok, detail = coq_prover.check_source(source)
+    result = (ProvenRule(rid, True, "ring") if ok
+              else ProvenRule(rid, False, "rejected", detail[:400]))
+    _RULE_CACHE[key] = result
+    return result
+
+
+def prove_ruleset(ex: dict) -> dict[str, ProvenRule]:
+    """Prove every rule in `exercise.ruleset`, keyed by rule id."""
+    defs = ex.get("definitions") or []
+    return {str(r.get("id")): prove_rule(r, defs) for r in (ex.get("ruleset") or [])}
+
+
+# ---------------------------------------------------------------------------
 # Public API.
 # ---------------------------------------------------------------------------
 @dataclass
@@ -263,6 +369,8 @@ def certify(ex: dict) -> CertifyResult:
 class GradeResult:
     status: str      # "certified" | "invalid" | "unattempted" | "uncertifiable" | "untranslatable" | "unavailable"
     reason: str = ""
+    source: str = ""                    # the Coq file the kernel accepted (certificate)
+    ruleset: dict | None = None         # per-rule proof status, for meta
 
 
 def grade_derivation(ex: dict, sub: dict) -> GradeResult:
@@ -271,47 +379,62 @@ def grade_derivation(ex: dict, sub: dict) -> GradeResult:
     if not goal or goal.get("type") != "eq" or not var:
         return GradeResult("untranslatable", "goal must be an equality with an inductionVar")
     var = str(var)
+
+    # Prove the transmitted ruleset FIRST: a rule Coq cannot prove may never be
+    # composed into a certified derivation, however correctly the student applies it.
+    proven = prove_ruleset(ex)
+    ruleset_meta = {rid: {"proven": p.proven, "method": p.method, "detail": p.detail}
+                    for rid, p in proven.items()}
+
     base_steps = (sub.get("base") or {}).get("steps")
     step_steps = (sub.get("step") or {}).get("steps")
     if not base_steps or not step_steps:
         return GradeResult("unattempted",
                            "no induction derivation submitted (need both a base-case and an "
-                           "inductive-step derivation)")
+                           "inductive-step derivation)", ruleset=ruleset_meta)
 
-    rules = step_check.build_rules(ex)
+    rules = step_check.build_rules(ex, {rid for rid, p in proven.items() if p.proven})
     ac = step_check.ac_ops(ex)   # () unless exercise.options.ac_normalization
     # Base: reduce P(0) to a tautology using the claimed rules only.
     base0 = step_check.substitute(goal, var, {"type": "number", "value": "0"})
     base = step_check.check_case(base0, base_steps, rules, ih=None, ac=ac)
     if base.status == "invalid":
-        return GradeResult("invalid", f"base case: {base.reason}")
+        return GradeResult("invalid", f"base case: {base.reason}", ruleset=ruleset_meta)
     if base.status != "certified":
-        return GradeResult("uncertifiable", f"base case: {base.reason}")
+        return GradeResult("uncertifiable", f"base case: {base.reason}", ruleset=ruleset_meta)
     if not step_check.is_reflexive(base.final, ac):
-        return GradeResult("invalid", "base case did not reduce both sides to a common form (t = t)")
+        return GradeResult("invalid", "base case did not reduce both sides to a common form (t = t)",
+                           ruleset=ruleset_meta)
     # Step: reduce P(S n) to a tautology, licensed to substitute the IH P(n).
     succ = {"type": "succ", "slots": {"inner": [{"type": "variable", "value": var}]}}
     step0 = step_check.substitute(goal, var, succ)
     ih = (goal["slots"]["left"][0], goal["slots"]["right"][0])
     stp = step_check.check_case(step0, step_steps, rules, ih=ih, ac=ac)
     if stp.status == "invalid":
-        return GradeResult("invalid", f"inductive step: {stp.reason}")
+        return GradeResult("invalid", f"inductive step: {stp.reason}", ruleset=ruleset_meta)
     if stp.status != "certified":
-        return GradeResult("uncertifiable", f"inductive step: {stp.reason}")
+        return GradeResult("uncertifiable", f"inductive step: {stp.reason}", ruleset=ruleset_meta)
     if not step_check.is_reflexive(stp.final, ac):
-        return GradeResult("invalid", "inductive step did not reduce both sides to a common form (t = t)")
+        return GradeResult("invalid", "inductive step did not reduce both sides to a common form (t = t)",
+                           ruleset=ruleset_meta)
 
-    # Every student step is a valid rule-instance and both obligations close. The
-    # Coq kernel backstops the induction leap (and guards the definitions).
+    # Every student step is an instance of a rule the kernel PROVED, and both
+    # obligations close. The Coq kernel backstops the induction leap (and guards
+    # the definitions).
     if not coq_prover.coq_available():
         return GradeResult("uncertifiable",
                            "derivation steps are valid but the Coq kernel is unavailable to "
-                           "certify the induction leap")
+                           "certify the induction leap", ruleset=ruleset_meta)
     cert = certify(ex)
     if cert.certified:
+        try:
+            source = build_source(ex)
+        except InductionError:            # cannot happen: certify() just built it
+            source = ""
         return GradeResult("certified",
-                           "every step is the claimed rule applied correctly, and the Coq kernel "
-                           "certifies the induction")
+                           "every step is an instance of a Coq-proven rule, and the Coq kernel "
+                           "certifies the induction",
+                           source=source, ruleset=ruleset_meta)
     return GradeResult("uncertifiable",
                        f"derivation steps are valid but the Coq backstop did not certify the goal "
-                       f"({cert.method})")
+                       f"({cert.method})", ruleset=ruleset_meta)

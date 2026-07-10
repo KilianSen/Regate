@@ -53,6 +53,7 @@ class FakeCvc5:
 def _install(respond):
     cvc5_prover._CACHE.clear()
     cvc5_induction._CACHE.clear()
+    cvc5_induction._RULE_CACHE.clear()
     cvc5_prover.cvc5_available = lambda: True            # type: ignore[assignment]
     cvc5_prover.carcara_available = lambda: False        # type: ignore[assignment]
     fake = FakeCvc5(respond)
@@ -188,6 +189,52 @@ def test_grade_induction_certified():
     assert resp["proof"] and resp["proof"][0]["engine"] == "cvc5"
 
 
+def test_certified_carries_a_recheckable_proof():
+    # The protocol: `certified: true` must carry a proof the caller can re-verify.
+    # cvc5 cannot export Alethe for an induction, so the certificate is the SMT-LIB.
+    _install(lambda s, a: ("unknown", "") if "--fmf-fun" in a else ("unsat", ""))
+    resp = grade.grade(_ind_req(_sub(VALID_BASE, VALID_STEP)))
+    proof = resp["proof"][0]
+    assert proof["engine"] == "cvc5" and proof["expect"] == "unsat"
+    assert "(check-sat)" in proof["smtlib"] and "(assert (not (forall" in proof["smtlib"]
+    assert resp["meta"]["rechecked"] is False       # honest: no independent re-check
+
+
+def test_unsound_rule_is_never_certified():
+    # The bug this pins: cvc5 certifies the GOAL, not the ruleset. With a true goal
+    # (1ⁿ = 1) and a step citing the FALSE rule `a·b = b`, correctly applied,
+    # cvc5regate used to return proven_equal/100/certified. An unproven rule must
+    # make the derivation `unknown` — inconclusive, not a wrong answer.
+    unsound = [{"id": "drop_left", "lhs": mul(wd("a"), wd("b")), "rhs": wd("b"),
+                "bidirectional": False, "conditions": []}]
+    step = [dict(s) for s in VALID_STEP]
+    step[2] = dict(step[2], rule="drop_left")
+
+    def respond(src, args):
+        if "--fmf-fun" in args:
+            return ("unknown", "")                  # no counterexample to the goal
+        if "--quant-ind" in args:
+            return ("unsat", "")                    # the goal itself is true
+        return ("sat", "")                          # ...but the rule is refutable
+    _install(respond)
+    resp = grade.grade(_ind_req(_sub(VALID_BASE, step), ruleset=unsound))
+    assert resp["outcome"] == "unknown" and resp["score"] is None and not resp["certified"]
+    assert resp["meta"]["ruleset"]["drop_left"]["proven"] is False
+
+
+def test_false_goal_returns_proven_unequal_with_witness():
+    # `certify` could always build a proven_unequal verdict, but grade_derivation only
+    # consulted it after both obligations had certified, so no witness ever escaped.
+    def respond(src, args):
+        if "--fmf-fun" in args:
+            return ("sat", "sat\n(((val n) 0))")    # counterexample at n = 0
+        return ("unsat", "")
+    _install(respond)
+    resp = grade.grade(_ind_req(_sub(VALID_BASE, VALID_STEP)))
+    assert resp["outcome"] == "proven_unequal" and resp["score"] == 0
+    assert resp["witness"] == {"n": "0"}            # protocol: a witness is mandatory here
+
+
 def test_grade_induction_invalid_wrong_result():
     _install(lambda s, a: ("unsat", ""))            # symbolic rejects before any backstop
     bad = [dict(VALID_BASE[0], result=eq(num(1), num(2)))]   # pow_zero gives 1=1, not 1=2
@@ -227,7 +274,10 @@ def test_ac_matching_commutative():
     # `mul_one_left` is `1·a → a`; applied to `x·1` it matches only modulo
     # commutativity. AC off ⇒ no match (invalid); AC on ⇒ closes.
     import step_check as sc
-    rules = {"mul_one_left": sc.Rule("mul_one_left", mul(num(1), wd("a")), wd("a"))}
+    # `proven=True`: this test is about AC matching, not about the solver's verdict
+    # on the rule. An unproven rule is uncertifiable before matching is even tried.
+    rules = {"mul_one_left": sc.Rule("mul_one_left", mul(num(1), wd("a")), wd("a"),
+                                     proven=True)}
     src = eq(mul(vr("x"), num(1)), vr("x"))                       # x·1 = x
     step = {"rule": "mul_one_left", "path": [0], "result": eq(vr("x"), vr("x"))}
     assert sc.check_case(src, [step], rules, ih=None, ac=()).status == "invalid"

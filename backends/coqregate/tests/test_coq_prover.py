@@ -44,6 +44,7 @@ class FakeCoq:
 def _install(accept):
     coq_prover._CACHE.clear()
     coq_induction._CACHE.clear()
+    coq_induction._RULE_CACHE.clear()
     coq_prover.coq_available = lambda: True        # type: ignore[assignment]
     fake = FakeCoq(accept)
     coq_prover.check_source = fake                  # type: ignore[assignment]
@@ -191,6 +192,39 @@ def test_grade_induction_certified():
     assert resp["meta"]["induction"]["status"] == "certified"
 
 
+def test_certified_carries_a_recheckable_proof():
+    # The protocol: `certified: true` must carry a proof the caller can re-verify.
+    _install(lambda src: True)
+    resp = grade.grade(_ind_req(_sub(VALID_BASE, VALID_STEP)))
+    proof = resp["proof"]
+    assert proof and proof[0]["engine"] == "coq"
+    assert f"Theorem {coq_induction.THEOREM}" in proof[0]["source"] and "Qed." in proof[0]["source"]
+
+
+def test_unsound_rule_is_never_certified():
+    # The bug this pins: the Coq kernel certifies the GOAL, not the ruleset. With a
+    # true goal (1ⁿ = 1) and a step citing the FALSE rule `a·b = b`, correctly applied,
+    # coqregate used to return proven_equal/100/certified. An unproven rule must make
+    # the derivation `unknown` — inconclusive, not a wrong answer.
+    unsound = [{"id": "drop_left", "lhs": mul(wd("a"), wd("b")), "rhs": wd("b"),
+                "bidirectional": False, "conditions": []}]
+    step = [dict(s) for s in VALID_STEP]
+    step[2] = dict(step[2], rule="drop_left")
+    # The kernel accepts the induction goal but rejects the rule's own theorem.
+    _install(lambda src: f"Theorem {coq_induction.RULE_THEOREM}" not in src)
+    resp = grade.grade(_ind_req(_sub(VALID_BASE, step), ruleset=unsound))
+    assert resp["outcome"] == "unknown" and resp["score"] is None and not resp["certified"]
+    assert resp["meta"]["ruleset"]["drop_left"]["proven"] is False
+
+
+def test_proven_rule_is_certified():
+    # ...and the same shape with a rule the kernel *does* prove still certifies.
+    _install(lambda src: True)
+    resp = grade.grade(_ind_req(_sub(VALID_BASE, VALID_STEP)))
+    assert resp["outcome"] == "proven_equal" and resp["certified"]
+    assert resp["meta"]["ruleset"]["mul_one_left"]["proven"] is True
+
+
 def test_grade_induction_invalid_wrong_result():
     _install(lambda src: True)                         # symbolic check rejects before the backstop
     bad = [dict(VALID_BASE[0], result=eq(num(1), num(2)))]   # pow_zero gives 1=1, not 1=2
@@ -229,7 +263,10 @@ def test_ac_matching_commutative():
     # `mul_one_left` is `1·a → a`; applied to `x·1` (the 1 on the *other* side) it
     # only matches modulo commutativity. AC off ⇒ no match (invalid); AC on ⇒ closes.
     import step_check as sc
-    rules = {"mul_one_left": sc.Rule("mul_one_left", mul(num(1), wd("a")), wd("a"))}
+    # `proven=True`: this test is about AC matching, not about the kernel's verdict
+    # on the rule. An unproven rule is uncertifiable before matching is even tried.
+    rules = {"mul_one_left": sc.Rule("mul_one_left", mul(num(1), wd("a")), wd("a"),
+                                     proven=True)}
     src = eq(mul(vr("x"), num(1)), vr("x"))                       # x·1 = x
     step = {"rule": "mul_one_left", "path": [0], "result": eq(vr("x"), vr("x"))}
     assert sc.check_case(src, [step], rules, ih=None, ac=()).status == "invalid"

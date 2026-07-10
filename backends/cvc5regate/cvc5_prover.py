@@ -143,6 +143,20 @@ def _key(*parts: str) -> str:
     return hashlib.sha256("\0".join(parts).encode()).hexdigest()
 
 
+def prove_rule(rule_source: str) -> SolveResult:
+    """Prove a transmitted rule's universally-quantified equality (negated goal →
+    expect `unsat`). Plain solving: a rule is an unconditional algebraic identity,
+    not an inductive claim, so neither `--quant-ind` nor the model finder applies.
+    A rule cvc5 cannot settle is simply unproven — inconclusive, never false."""
+    key = _key("rule", rule_source)
+    if key in _CACHE:
+        return _CACHE[key]
+    verdict, detail = _run_cvc5(rule_source, [], timeout=DISPROVE_TIMEOUT)
+    res = SolveResult(verdict, detail)
+    _CACHE[key] = res
+    return res
+
+
 def prove(prove_source: str, want_certificate: bool = True) -> SolveResult:
     """Prove `∀n.P(n)` via `--quant-ind` (negated goal → expect `unsat`).
 

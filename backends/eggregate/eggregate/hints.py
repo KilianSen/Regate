@@ -18,15 +18,21 @@ from collections import deque
 from dataclasses import dataclass
 
 from .rule import Rule
-from .conditions import DISCHARGED, discharge
+from .conditions import DISCHARGED, Assumption, discharge
 from .matching import instantiate, match
 from .model import MathNode, Path, distance, pretty
 
 
-def _constraint_ok(rule: Rule, env: dict[str, MathNode]) -> bool:
-    """A rule may be auto-applied during search only if every guard is
-    DISCHARGED purely from the literals present (search carries no assumptions)."""
-    return all(discharge(c, env[c.var]) == DISCHARGED for c in rule.conditions)
+def _constraint_ok(rule: Rule, env: dict[str, MathNode],
+                   assumptions: frozenset[Assumption] = frozenset()) -> bool:
+    """A rule may be auto-applied during search only if every guard is DISCHARGED
+    -- from the literals present, or from a fact the exercise declared. A guard on
+    a wildcard the pattern does not bind is undecidable, so the rule cannot fire."""
+    for c in rule.conditions:
+        binding = env.get(c.var)
+        if binding is None or discharge(c, binding, assumptions) != DISCHARGED:
+            return False
+    return True
 
 
 @dataclass(frozen=True)
@@ -47,13 +53,16 @@ def _reversible(rules: list[Rule]) -> list[Rule]:
             if r.bidir and not r.conditions and r.lhs.op != "wild" and r.rhs.op != "wild"]
 
 
-def applications(node: MathNode, rules: list[Rule], *, bidirectional: bool = False) -> list[Application]:
+def applications(node: MathNode, rules: list[Rule], *, bidirectional: bool = False,
+                 assumptions: frozenset[Assumption] = frozenset()) -> list[Application]:
     """Every (rule, path) application that changes ``node``, deduped.
 
     Forward only by default (the directed step engine / hint semantics). With
     ``bidirectional=True`` it also emits the right-to-left direction of every
     safely-reversible rule — used only by the proof-certificate search, where each
-    step is independently re-checked by ``robust.recheck_proof``."""
+    step is independently re-checked by ``robust.recheck_proof``. ``assumptions``
+    are the exercise's declared facts; without them a guarded rule can only fire
+    on literals."""
     out: list[Application] = []
     seen: set[tuple[str, bool, MathNode]] = set()
 
@@ -77,11 +86,12 @@ def applications(node: MathNode, rules: list[Rule], *, bidirectional: bool = Fal
             out.append(Application(rule_id, path, result, forward))
 
     for rule in rules:
-        # forward direction must still discharge guards from the literals present
+        # forward direction must still discharge guards, from the literals present
+        # or from the exercise's declared assumptions
         for path in node.paths():
             sub = node.at(path)
             env = match(rule.lhs, sub)
-            if env is None or not _constraint_ok(rule, env):
+            if env is None or not _constraint_ok(rule, env, assumptions):
                 continue
             new_sub = instantiate(rule.rhs, env)
             if new_sub == sub:
@@ -101,8 +111,9 @@ def applications(node: MathNode, rules: list[Rule], *, bidirectional: bool = Fal
 # ---------------------------------------------------------------------------
 # Greedy one-ply hints (reproduces Table 8 -- the heuristic MS3 improves on).
 # ---------------------------------------------------------------------------
-def greedy_hints(state: MathNode, target: MathNode, rules: list[Rule], k: int = 3):
-    apps = applications(state, rules)
+def greedy_hints(state: MathNode, target: MathNode, rules: list[Rule], k: int = 3,
+                 assumptions: frozenset[Assumption] = frozenset()):
+    apps = applications(state, rules, assumptions=assumptions)
     ranked = sorted(apps, key=lambda a: (distance(a.result, target), a.rule_id))
     return ranked[:k]
 
@@ -119,7 +130,8 @@ class Step:
 
 
 def shortest_path(source: MathNode, target: MathNode, rules: list[Rule],
-                  max_depth: int = 8, *, bidirectional: bool = False) -> list[Step] | None:
+                  max_depth: int = 8, *, bidirectional: bool = False,
+                  assumptions: frozenset[Assumption] = frozenset()) -> list[Step] | None:
     """Breadth-first shortest derivation from ``source`` to ``target``.
 
     Forward only by default. With ``bidirectional=True`` it may also use the
@@ -136,7 +148,8 @@ def shortest_path(source: MathNode, target: MathNode, rules: list[Rule],
         state, trail = frontier.popleft()
         if len(trail) >= max_depth:
             continue
-        for app in applications(state, rules, bidirectional=bidirectional):
+        for app in applications(state, rules, bidirectional=bidirectional,
+                                assumptions=assumptions):
             if app.result in seen:
                 continue
             step = Step(app.rule_id, app.path, app.result, app.forward)

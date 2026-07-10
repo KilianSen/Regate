@@ -81,9 +81,19 @@ def grade(request: dict) -> dict:
         meta["induction"]["leanBackstop"] = res.method
         meta["induction"]["detail"] = res.detail
         if res.certified:
-            return _envelope("proven_equal", 100, True, meta=meta,
+            # `certified: true` owes the caller something re-checkable. The proof is
+            # the Lean file the kernel accepted, plus the lemma names each step was
+            # certified against: run `lean` on it and you get the same verdict.
+            try:
+                source = lean_induction.build_source(ex)
+            except lean_induction.InductionError:   # cannot happen: certify() built it
+                source = ""
+            proof = [{"engine": "lean", "method": "induction",
+                      "theorem": lean_induction.THEOREM, "source": source}]
+            return _envelope("proven_equal", 100, True, meta=meta, proof=proof,
                              feedback="Certified: base case and inductive step verified; "
-                                      "∀n. P(n) follows by Lean induction (Nat.rec).")
+                                      "∀n. P(n) follows by Lean induction (Nat.rec). "
+                                      "The accepted Lean source is attached as the proof.")
         reason = {"unavailable": "the Lean toolchain is unavailable in this deployment",
                   "untranslatable": f"the goal is outside the certifiable fragment ({res.detail})",
                   "rejected": "Lean could not confirm the inductive claim"}.get(res.method, res.detail)
@@ -131,7 +141,10 @@ def grade(request: dict) -> dict:
     #    a = a) is correct regardless of path — structural equality on MathNode.
     final = sub.get("final")
     if final is not None and _reached_goal(mode, final, target):
-        return _envelope("proven_equal", 100, True, meta=meta,
+        # The empty proof is the certificate: zero rewrites are needed, the terms are
+        # structurally identical. `proof: []` says "checked, nothing to do"; `null`
+        # would say "certified, but nothing to show for it" — a protocol violation.
+        return _envelope("proven_equal", 100, True, meta=meta, proof=[],
                          feedback="Reached the target form." if mode != "equation"
                                   else "Both sides are identical — the equation holds.")
 

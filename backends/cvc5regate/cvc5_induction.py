@@ -25,7 +25,7 @@ _BIN = {"add": "+", "sub": "-", "mul": "*"}
 # ---------------------------------------------------------------------------
 def _infer(node: dict, dom: str, env: dict[str, str], indvar: str = "") -> None:
     t = node.get("type")
-    if t == "variable":
+    if t in ("variable", "wild"):
         name = str(node["value"])
         # The induction variable is ALWAYS the ℕ datatype (cvc5 inducts on it
         # structurally); wherever it appears in a numeric position it is coerced
@@ -264,8 +264,13 @@ def _preamble(ctx: _Ctx, defs_block: str) -> str:
     return "\n".join(lines) + "\n" + defs_block
 
 
-def _translate(ex: dict) -> tuple[str, str, str, list[str]]:
-    """Return (preamble+defs, goal_bool, induction_var, numeric_var_names)."""
+def _translate(ex: dict, force_val: bool = False) -> tuple[str, str, str, list[str]]:
+    """Return (preamble+defs, goal_bool, induction_var, numeric_var_names).
+
+    ``force_val`` emits the ``val : Nat -> Int`` helper even when the goal never
+    coerces a ℕ into a numeric position -- the disprove source needs it to read the
+    induction variable back out via ``(get-value ((val n)))``.
+    """
     goal = ex.get("goal")
     if not goal or goal.get("type") not in (set(_REL) | {"divides"}):
         raise InductionError("induction goal must be a relation (=,<=,<,>=,>,divides)")
@@ -281,6 +286,7 @@ def _translate(ex: dict) -> tuple[str, str, str, list[str]]:
 
     sort = _numsort(ex, goal)
     ctx = _Ctx(sort, env)
+    ctx.need_val = force_val
     # Translate the goal first so `ctx` learns which built-ins/defs are needed,
     # but recursive defs must be emitted before the goal references them.
     defs = ""
@@ -310,7 +316,10 @@ def build_disprove_source(ex: dict) -> tuple[str, list[str]]:
     """SMT for refuting `∀n.P(n)`: the induction variable is a *free* constant and
     we ask cvc5 (with `--fmf-fun`) to find a numeric model — a counterexample. Also
     returns the `get-value` labels naming the witness."""
-    preamble, goal_bool, var, num_vars = _translate(ex)
+    # `force_val`: the witness is read back as `(val n)`, so `val` must be defined
+    # even when the goal itself never coerces `n` into a numeric position. Without
+    # it cvc5 parse-errors on the `get-value` and the counterexample is lost.
+    preamble, goal_bool, var, num_vars = _translate(ex, force_val=True)
     sort = _numsort(ex, ex["goal"])
     decls = [f"(declare-const {v} {sort})" for v in num_vars]
     decls.append(f"(declare-const {var} Nat)")
@@ -325,6 +334,98 @@ def build_disprove_source(ex: dict) -> tuple[str, list[str]]:
 def build_source(ex: dict) -> str:
     """The prove-source (used by tests / inspection)."""
     return build_prove_source(ex)
+
+
+# ---------------------------------------------------------------------------
+# Proving the transmitted ruleset (rules are untrusted exercise data).
+#
+# cvc5's induction certifies the *goal*, not the ruleset, so a derivation whose
+# steps cite a false rule (`a*b = b`) would otherwise certify any true goal. Each
+# transmitted rule therefore becomes its own SMT validity query before it may
+# appear in a certified derivation. Unproven is inconclusive (→ `unknown`), never
+# `invalid`. Recursive `definitions` are definitional, hence trusted.
+# ---------------------------------------------------------------------------
+@dataclass
+class ProvenRule:
+    id: str
+    proven: bool
+    method: str      # "smt" | "rejected" | "guarded" | "unavailable" | "untranslatable"
+    detail: str = ""
+
+
+def _mentions(node: dict, types: tuple[str, ...]) -> bool:
+    if node.get("type") in types:
+        return True
+    return any(_mentions(ch, types)
+               for children in (node.get("slots") or {}).values() for ch in children)
+
+
+def build_rule_source(rule: dict, ex: dict) -> str:
+    """SMT for proving one transmitted rule: assert the negated universally-
+    quantified equality, so `unsat` means the rule holds."""
+    lhs_node, rhs_node = rule.get("lhs"), rule.get("rhs")
+    if not lhs_node or not rhs_node:
+        raise InductionError("rule needs lhs and rhs")
+
+    env: dict[str, str] = {}
+    _infer(lhs_node, "Q", env)
+    _infer(rhs_node, "Q", env)
+
+    sort = _numsort(ex, ex.get("goal") or {"type": "eq"})
+    ctx = _Ctx(sort, env)
+
+    definitions = ex.get("definitions") or []
+    defs = ""
+    if _mentions(lhs_node, ("pow",)) or _mentions(rhs_node, ("pow",)):
+        defs += _build_pow(definitions, ctx)
+    if _mentions(lhs_node, ("apply",)) or _mentions(rhs_node, ("apply",)):
+        defs += _build_apply_defs(definitions, ctx)
+
+    body = f"(= {_term(lhs_node, ctx)} {_term(rhs_node, ctx)})"
+    preamble = _preamble(ctx, defs)
+
+    binders = [f"({v} {sort})" for v, d in sorted(env.items()) if d == "Q"]
+    binders += [f"({v} Nat)" for v, d in sorted(env.items()) if d == "N"]
+    if not binders:                       # a ground rule: no quantifier needed
+        return preamble + f"(assert (not {body}))\n(check-sat)\n"
+    return (preamble +
+            f"(assert (not (forall ({' '.join(binders)}) {body})))\n"
+            "(check-sat)\n")
+
+
+_RULE_CACHE: dict[str, ProvenRule] = {}
+
+
+def prove_rule(rule: dict, ex: dict) -> ProvenRule:
+    """SMT-prove one transmitted rule. Unproven is inconclusive, not false."""
+    rid = str(rule.get("id", "?"))
+    if rule.get("conditions"):
+        # A guarded rule (`x/x = 1` needing `x != 0`) is not an unconditional
+        # equality; we do not model the side condition, so we cannot prove it.
+        return ProvenRule(rid, False, "guarded",
+                          "guarded rules are outside the certifiable fragment")
+    try:
+        source = build_rule_source(rule, ex)
+    except InductionError as e:
+        return ProvenRule(rid, False, "untranslatable", str(e))
+
+    key = hashlib.sha256(source.encode()).hexdigest()
+    if key in _RULE_CACHE:
+        return _RULE_CACHE[key]
+    if not cvc5_prover.cvc5_available():
+        return ProvenRule(rid, False, "unavailable", "cvc5 toolchain unavailable")
+
+    res = cvc5_prover.prove_rule(source)
+    result = (ProvenRule(rid, True, "smt") if res.verdict == "unsat"
+              else ProvenRule(rid, False, "rejected",
+                              f"cvc5 returned {res.verdict}: {res.detail[:300]}"))
+    _RULE_CACHE[key] = result
+    return result
+
+
+def prove_ruleset(ex: dict) -> dict[str, ProvenRule]:
+    """Prove every rule in `exercise.ruleset`, keyed by rule id."""
+    return {str(r.get("id")): prove_rule(r, ex) for r in (ex.get("ruleset") or [])}
 
 
 # ---------------------------------------------------------------------------
@@ -415,8 +516,11 @@ def _store(key: str, result: CertifyResult) -> CertifyResult:
 # ---------------------------------------------------------------------------
 @dataclass
 class GradeResult:
-    status: str      # "certified" | "invalid" | "unattempted" | "uncertifiable" | "untranslatable" | "unavailable"
+    status: str      # "certified" | "refuted" | "invalid" | "unattempted" | "uncertifiable" | "untranslatable" | "unavailable"
     reason: str = ""
+    witness: dict | None = None      # numeric counterexample, when status == "refuted"
+    smtlib: str = ""                 # the SMT-LIB the solver accepted (certificate)
+    ruleset: dict | None = None      # per-rule proof status, for meta
 
 
 def grade_derivation(ex: dict, sub: dict) -> GradeResult:
@@ -426,44 +530,73 @@ def grade_derivation(ex: dict, sub: dict) -> GradeResult:
         return GradeResult("untranslatable",
                            "derivation grading needs an equality goal with an inductionVar")
     var = str(var)
+
+    # Disprove FIRST, before grading anything: if the goal is false, no derivation
+    # of it can be right, and a numeric counterexample is the most useful thing we
+    # can hand back. `certify` runs the same cheap `--fmf-fun` model search; its
+    # `proven_unequal` verdict used to be unreachable through /grade because we only
+    # consulted it *after* both obligations had already certified.
+    if cvc5_prover.cvc5_available():
+        refute = certify(ex)
+        if refute.outcome == "proven_unequal" and refute.witness:
+            return GradeResult("refuted", "cvc5 found a counterexample to the goal",
+                               witness=refute.witness)
+
+    # Prove the transmitted ruleset: a rule cvc5 cannot prove may never be composed
+    # into a certified derivation, however correctly the student applies it.
+    proven = prove_ruleset(ex)
+    ruleset_meta = {rid: {"proven": p.proven, "method": p.method, "detail": p.detail}
+                    for rid, p in proven.items()}
+
     base_steps = (sub.get("base") or {}).get("steps")
     step_steps = (sub.get("step") or {}).get("steps")
     if not base_steps or not step_steps:
         return GradeResult("unattempted",
                            "no induction derivation submitted (need both a base-case and an "
-                           "inductive-step derivation)")
+                           "inductive-step derivation)", ruleset=ruleset_meta)
 
-    rules = step_check.build_rules(ex)
+    rules = step_check.build_rules(ex, {rid for rid, p in proven.items() if p.proven})
     ac = step_check.ac_ops(ex)   # () unless exercise.options.ac_normalization
     base0 = step_check.substitute(goal, var, {"type": "number", "value": "0"})
     base = step_check.check_case(base0, base_steps, rules, ih=None, ac=ac)
     if base.status == "invalid":
-        return GradeResult("invalid", f"base case: {base.reason}")
+        return GradeResult("invalid", f"base case: {base.reason}", ruleset=ruleset_meta)
     if base.status != "certified":
-        return GradeResult("uncertifiable", f"base case: {base.reason}")
+        return GradeResult("uncertifiable", f"base case: {base.reason}", ruleset=ruleset_meta)
     if not step_check.is_reflexive(base.final, ac):
-        return GradeResult("invalid", "base case did not reduce both sides to a common form (t = t)")
+        return GradeResult("invalid", "base case did not reduce both sides to a common form (t = t)",
+                           ruleset=ruleset_meta)
     succ = {"type": "succ", "slots": {"inner": [{"type": "variable", "value": var}]}}
     step0 = step_check.substitute(goal, var, succ)
     ih = (goal["slots"]["left"][0], goal["slots"]["right"][0])
     stp = step_check.check_case(step0, step_steps, rules, ih=ih, ac=ac)
     if stp.status == "invalid":
-        return GradeResult("invalid", f"inductive step: {stp.reason}")
+        return GradeResult("invalid", f"inductive step: {stp.reason}", ruleset=ruleset_meta)
     if stp.status != "certified":
-        return GradeResult("uncertifiable", f"inductive step: {stp.reason}")
+        return GradeResult("uncertifiable", f"inductive step: {stp.reason}", ruleset=ruleset_meta)
     if not step_check.is_reflexive(stp.final, ac):
-        return GradeResult("invalid", "inductive step did not reduce both sides to a common form (t = t)")
+        return GradeResult("invalid", "inductive step did not reduce both sides to a common form (t = t)",
+                           ruleset=ruleset_meta)
 
-    # Every student step is a valid rule-instance and both obligations close. cvc5
-    # backstops the induction leap by certifying the goal (disprove-first, then prove).
+    # Every student step is an instance of a cvc5-proven rule and both obligations
+    # close. cvc5 backstops the induction leap by certifying the goal.
     if not cvc5_prover.cvc5_available():
         return GradeResult("uncertifiable",
                            "derivation steps are valid but cvc5 is unavailable to certify "
-                           "the induction leap")
+                           "the induction leap", ruleset=ruleset_meta)
     cert = certify(ex)
     if cert.certified:
+        try:
+            smtlib = build_prove_source(ex)
+        except InductionError:            # cannot happen: certify() just built it
+            smtlib = ""
         return GradeResult("certified",
-                           "every step is the claimed rule applied correctly, and cvc5 certifies "
-                           "the induction")
+                           "every step is an instance of a cvc5-proven rule, and cvc5 certifies "
+                           "the induction",
+                           smtlib=smtlib, ruleset=ruleset_meta)
+    if cert.outcome == "proven_unequal" and cert.witness:
+        return GradeResult("refuted", "cvc5 found a counterexample to the goal",
+                           witness=cert.witness, ruleset=ruleset_meta)
     return GradeResult("uncertifiable",
-                       f"derivation steps are valid but cvc5 did not certify the goal ({cert.method})")
+                       f"derivation steps are valid but cvc5 did not certify the goal ({cert.method})",
+                       ruleset=ruleset_meta)

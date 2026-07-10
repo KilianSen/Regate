@@ -40,6 +40,14 @@ class RequestError(ValueError):
     """Malformed request -> HTTP 400 / CLI exit 2."""
 
 
+def _node(raw, what: str) -> MathNode:
+    """Parse a MathNode, turning any malformation into a 400 rather than a 500."""
+    try:
+        return from_json(raw)
+    except (KeyError, TypeError, ValueError, AttributeError) as e:
+        raise RequestError(f"malformed MathNode in {what}: {e}")
+
+
 # Rules the equivalence oracle gains when an exercise treats +/· as AC-free. They
 # augment the *oracle only* (final-answer / equation equivalence), never the
 # student's step-validation palette — a derivation must still cite a rule.
@@ -98,15 +106,33 @@ def _step_to_json(s) -> dict:
 def _moves_from_steps(steps, by_id, hyps) -> list[Move]:
     """Build Moves. A Type-B (Leibniz) step is in scope only if its equation is
     one of the exercise's given hypotheses -- otherwise a student could substitute
-    with a false equation and "prove" anything."""
+    with a false equation and "prove" anything.
+
+    A step missing the field its kind requires is a malformed *request*, not a
+    wrong answer: it must surface as a 400/exit-2, never as a grade or a crash.
+    """
     moves = []
-    for s in steps:
-        path = tuple(s.get("path", []))
+    for i, s in enumerate(steps):
+        if not isinstance(s, dict):
+            raise RequestError(f"step {i} must be an object")
+        try:
+            path = tuple(s.get("path", []))
+        except TypeError:
+            raise RequestError(f"step {i}: path must be a list of indices")
         if s.get("kind", "A") == "B":
-            lhs, rhs = from_json(s["equation"][0]), from_json(s["equation"][1])
+            eq = s.get("equation")
+            if not isinstance(eq, (list, tuple)) or len(eq) != 2:
+                raise RequestError(f"step {i}: a kind-B step needs an "
+                                   f"'equation': [lhs, rhs]")
+            try:
+                lhs, rhs = from_json(eq[0]), from_json(eq[1])
+            except (KeyError, TypeError, ValueError) as e:
+                raise RequestError(f"step {i}: malformed equation ({e})")
             moves.append(Move("B", path, equation=Equation(lhs, rhs), in_scope=(lhs, rhs) in hyps))
         else:
-            rid = s["rule"]
+            rid = s.get("rule")
+            if rid is None:
+                raise RequestError(f"step {i}: a kind-A step needs a 'rule' id")
             if rid not in by_id:
                 raise RequestError(f"unknown rule id {rid!r}")
             moves.append(Move("A", path, rule=by_id[rid],
@@ -120,9 +146,10 @@ def _parse_assumptions(ex) -> frozenset:
     out = set()
     for a in ex.get("assumptions") or []:
         try:
-            out.add(Assumption(a["kind"], from_json(a["value"])))
+            kind, value = a["kind"], a["value"]
         except (KeyError, TypeError) as e:
             raise RequestError(f"invalid assumption: {e}")
+        out.add(Assumption(kind, _node(value, "assumption.value")))
     return frozenset(out)
 
 
@@ -131,7 +158,7 @@ def _parse_hypotheses(ex) -> set:
     (lhs, rhs) MathNode pairs."""
     hyps = set()
     for h in ex.get("hypotheses") or []:
-        node = from_json(h)
+        node = _node(h, "hypothesis")
         if node.op != "eq":
             raise RequestError("each hypothesis must be an equality (eq) expression")
         # Equality is symmetric: a hypothesis may be substituted either way.
@@ -154,7 +181,7 @@ def _prove_lemmas(lemmas, by_id, base_hyps, assumptions):
     for i, lem in enumerate(lemmas):
         if "source" not in lem:
             return frozenset(hyps), f"lemma {i} has no source"
-        start = from_json(lem["source"])
+        start = _node(lem["source"], f"lemma {i} source")
         moves = _moves_from_steps(lem.get("steps", []), by_id, frozenset(hyps))
         report = verify_chain(start, moves, None, assumptions=assumptions)
         if not report.valid:
@@ -167,21 +194,21 @@ def _prove_lemmas(lemmas, by_id, base_hyps, assumptions):
     return frozenset(hyps), None
 
 
-def _replay_obligation(source, steps_in, by_id, hyps):
+def _replay_obligation(source, steps_in, by_id, hyps, assumptions=frozenset()):
     """Replay one induction obligation (an equation) and report whether it is a
     valid derivation and whether it closes to a reflexive ``t = t`` tautology.
     Pure step-validation only -- never the egglog oracle or the ℚ evaluator, so it
     is sound for `succ`/`pow` and cannot crash on them. Returns
     (status, steps_out, final) with status in {"invalid","open","closed"}."""
     moves = _moves_from_steps(steps_in, by_id, hyps)
-    report = verify_chain(source, moves, None, assumptions=frozenset())
+    report = verify_chain(source, moves, None, assumptions=assumptions)
     steps_out = [{"index": i, "status": r.status, "reason": r.reason}
                  for i, r in enumerate(report.results)]
     if not report.valid:
         return "invalid", steps_out, None
     recomputed = report.states[1:]
     for i, st in enumerate(steps_in):
-        if st.get("result") is not None and from_json(st["result"]) != recomputed[i]:
+        if st.get("result") is not None and _node(st["result"], f"step {i} result") != recomputed[i]:
             steps_out[i].update(status="invalid", reason="claimed result does not match the rule output")
             return "invalid", steps_out, None
     final = report.states[-1]
@@ -203,7 +230,7 @@ def _grade_induction(ex, sub) -> dict:
     """
     if "goal" not in ex:
         raise RequestError("induction mode requires exercise.goal")
-    goal = from_json(ex["goal"])
+    goal = _node(ex["goal"], "exercise.goal")
     if goal.op != "eq":
         raise RequestError("induction goal must be an equality (eq)")
     name = ex.get("inductionVar")
@@ -211,15 +238,19 @@ def _grade_induction(ex, sub) -> dict:
         raise RequestError("induction mode requires exercise.inductionVar")
 
     rules, _, _ = _resolve_rules(ex)
-    defs = ruleset_from_json(ex.get("definitions") or [])
+    try:
+        defs = ruleset_from_json(ex.get("definitions") or [])
+    except (ValueError, KeyError, TypeError) as e:
+        raise RequestError(f"invalid definitions: {e}")
     by_id = {**{r.id: r for r in rules}, **{d.id: d for d in defs}}
+    assumptions = _parse_assumptions(ex)
 
     base_steps = (sub.get("base") or {}).get("steps") or []
     step_steps = (sub.get("step") or {}).get("steps") or []
 
     # Base: P(0).
     p0 = subst_var(goal, name, num(0))
-    b_status, b_out, _ = _replay_obligation(p0, base_steps, by_id, frozenset())
+    b_status, b_out, _ = _replay_obligation(p0, base_steps, by_id, frozenset(), assumptions)
     if b_status == "invalid":
         return {"outcome": "invalid_derivation", "score": 0, "certified": False,
                 "proof": None, "witness": None, "steps": b_out, "hint": None,
@@ -230,7 +261,7 @@ def _grade_induction(ex, sub) -> dict:
     psucc = subst_var(goal, name, succ(var(name)))
     ih = frozenset({(goal.slot("left"), goal.slot("right")),
                     (goal.slot("right"), goal.slot("left"))})
-    s_status, s_out, _ = _replay_obligation(psucc, step_steps, by_id, ih)
+    s_status, s_out, _ = _replay_obligation(psucc, step_steps, by_id, ih, assumptions)
     if s_status == "invalid":
         return {"outcome": "invalid_derivation", "score": 0, "certified": False,
                 "proof": None, "witness": None, "steps": s_out, "hint": None,
@@ -258,7 +289,11 @@ def grade(request: dict) -> dict:
 
     ex = request.get("exercise") or {}
     sub = request.get("submission") or {}
+    if not isinstance(ex, dict) or not isinstance(sub, dict):
+        raise RequestError("exercise and submission must be objects")
     mode = ex.get("mode", "transformation")
+    if mode not in ("transformation", "equation", "induction"):
+        raise RequestError(f"unsupported mode {mode!r}")
 
     # Induction has its own request shape (goal + inductionVar + base/step
     # sub-derivations) and is graded by the step-validator only.
@@ -283,8 +318,8 @@ def grade(request: dict) -> dict:
 
     if "source" not in ex:
         raise RequestError("exercise.source is required")
-    source = from_json(ex["source"])
-    target = from_json(ex["target"]) if ex.get("target") is not None else None
+    source = _node(ex["source"], "exercise.source")
+    target = _node(ex["target"], "exercise.target") if ex.get("target") is not None else None
     if mode == "transformation" and target is None:
         raise RequestError("transformation mode requires exercise.target")
     if sub.get("final") is None and not sub.get("steps"):
@@ -292,7 +327,7 @@ def grade(request: dict) -> dict:
 
     ref = None
     if ex.get("reference"):
-        ref = reference_from_states([from_json(s) for s in ex["reference"]])
+        ref = reference_from_states([_node(s, "exercise.reference") for s in ex["reference"]])
 
     assumptions = _parse_assumptions(ex)
     hyps = _parse_hypotheses(ex)
@@ -320,6 +355,23 @@ def _invalid(steps_out, idx, reason) -> dict:
             "feedback": f"step {idx} invalid: {reason}"}
 
 
+def _bounds(opts) -> tuple[int, ...]:
+    """Saturation bounds for the equivalence search. ``options.bound`` (protocol)
+    sets the starting bound; we still escalate, because a bound is a floor on
+    effort, not a cap on honesty -- giving up early would turn "equal" into
+    "unknown"."""
+    b = opts.get("bound")
+    if b is None:
+        return (5, 8, 12)
+    try:
+        b = int(b)
+    except (TypeError, ValueError):
+        raise RequestError("options.bound must be an integer")
+    if b < 1:
+        raise RequestError("options.bound must be >= 1")
+    return (b, b + 3, b + 7)
+
+
 def _grade_core(source, target, rules, by_id, sub, opts, ref, assumptions=frozenset(), hyps=frozenset()) -> dict:
     steps_out = None
     final = None
@@ -328,6 +380,8 @@ def _grade_core(source, target, rules, by_id, sub, opts, ref, assumptions=frozen
     # step legality (a derivation must still cite each rule it uses).
     ac = bool(opts.get("ac_normalization"))
     oracle = _oracle_rules(rules, ac)
+    bounds = _bounds(opts)
+    partial = opts.get("partial_credit", True)
 
     # 1) a submitted derivation: each step must be a valid rule application AND
     #    its claimed result must match what the rule actually produces (the
@@ -343,7 +397,7 @@ def _grade_core(source, target, rules, by_id, sub, opts, ref, assumptions=frozen
             return _invalid(steps_out, len(report.results) - 1, report.results[-1].reason)
         recomputed = report.states[1:]
         for i, st in enumerate(steps_in):
-            if st.get("result") is not None and from_json(st["result"]) != recomputed[i]:
+            if st.get("result") is not None and _node(st["result"], f"step {i} result") != recomputed[i]:
                 steps_out[i].update(status="invalid",
                                     reason="claimed result does not match the rule output")
                 return _invalid(steps_out, i, "claimed result does not match the rule output")
@@ -359,11 +413,11 @@ def _grade_core(source, target, rules, by_id, sub, opts, ref, assumptions=frozen
         final = report.states[-1]                      # valid but unfinished
 
     if final is None:
-        final = from_json(sub["final"])
+        final = _node(sub["final"], "submission.final")
     if target is None:                                 # equation mode
-        return _grade_equation(source, final, oracle, steps_out, ac)
+        return _grade_equation(source, final, oracle, steps_out, ac, assumptions, bounds)
 
-    resp = _grade_final(source, final, target, oracle, ac)
+    resp = _grade_final(source, final, target, oracle, ac, assumptions, bounds, partial)
     resp["steps"] = steps_out
     # Hint toward the goal when the answer is not yet full marks. A reference
     # derivation steers the hint onto the intended route (§B.4); without one we
@@ -375,7 +429,7 @@ def _grade_core(source, target, rules, by_id, sub, opts, ref, assumptions=frozen
                 resp["hint"] = {"rule": h.step.rule_id, "path": list(h.step.path),
                                 "direction": "forward", "remaining": h.remaining}
         if resp.get("hint") is None:
-            resp["hint"] = _hint_toward(final, target, rules)
+            resp["hint"] = _hint_toward(final, target, rules, assumptions)
     if ref is not None:
         p = progress(final, ref)
         resp.setdefault("meta", {})["progress"] = round(p, 3)
@@ -384,24 +438,24 @@ def _grade_core(source, target, rules, by_id, sub, opts, ref, assumptions=frozen
         # just blind closeness of form. Only ever raises a certified-equivalent
         # partial score (never invents credit for an unproven or wrong answer, and
         # never lowers the distance-based score).
-        if resp["outcome"] == PROVEN_EQUAL and resp.get("score") not in (None, 100):
+        if partial and resp["outcome"] == PROVEN_EQUAL and resp.get("score") not in (None, 100):
             resp["score"] = max(resp["score"], max(1, min(99, round(p * 100))))
     return resp
 
 
-def _hint_toward(state, target, rules) -> dict | None:
+def _hint_toward(state, target, rules, assumptions=frozenset()) -> dict | None:
     """A next-move hint toward ``target`` without an instructor reference.
 
     Prefers a step on a *shortest* directed path (so ``remaining`` is the true
     minimal distance); falls back to the greedy one-ply move when the goal is not
     reachable within the search bound.
     """
-    plan = shortest_path(state, target, rules)
+    plan = shortest_path(state, target, rules, assumptions=assumptions)
     if plan:
         s = plan[0]
         return {"rule": s.rule_id, "path": list(s.path), "direction": "forward",
                 "remaining": len(plan)}
-    greedy = greedy_hints(state, target, rules, k=1)
+    greedy = greedy_hints(state, target, rules, k=1, assumptions=assumptions)
     if greedy:
         g = greedy[0]
         return {"rule": g.rule_id, "path": list(g.path), "direction": "forward",
@@ -409,7 +463,8 @@ def _hint_toward(state, target, rules) -> dict | None:
     return None
 
 
-def _grade_equation(source, final, rules, steps_out, ac=False) -> dict:
+def _grade_equation(source, final, rules, steps_out, ac=False, assumptions=frozenset(),
+                    bounds=(5, 8, 12)) -> dict:
     """Equation mode: the submission proves an equation by showing its two sides
     are equivalent (e.g. reducing ``x + 0 = x`` to ``x = x``).
 
@@ -425,7 +480,7 @@ def _grade_equation(source, final, rules, steps_out, ac=False) -> dict:
     if _ac_equal(lhs, rhs, ac):
         return {**base, "outcome": PROVEN_EQUAL, "score": 100, "certified": True,
                 "proof": [], "feedback": "Both sides are identical — the equation holds."}
-    v = decide_equivalence(lhs, rhs, rules)
+    v = decide_equivalence(lhs, rhs, rules, bounds=bounds, assumptions=assumptions)
     if v.outcome == PROVEN_UNEQUAL:
         return {**base, "outcome": PROVEN_UNEQUAL, "score": 0, "certified": True,
                 "witness": {k: str(val) for k, val in v.witness.items()},
@@ -441,7 +496,8 @@ def _grade_equation(source, final, rules, steps_out, ac=False) -> dict:
             "feedback": "Could not prove or disprove the equation within budget; review."}
 
 
-def _grade_final(source, final, target, rules, ac=False) -> dict:
+def _grade_final(source, final, target, rules, ac=False, assumptions=frozenset(),
+                 bounds=(5, 8, 12), partial=True) -> dict:
     """Transformation grade for a final expression.
 
     Reaching the target *form* is full marks; a value-equivalent but unsimplified
@@ -453,14 +509,24 @@ def _grade_final(source, final, target, rules, ac=False) -> dict:
     if _ac_equal(final, target, ac):
         return {**base, "outcome": PROVEN_EQUAL, "score": 100, "certified": True,
                 "proof": [], "feedback": "Reached the target form."}
-    v = decide_equivalence(final, target, rules)
+    v = decide_equivalence(final, target, rules, bounds=bounds, assumptions=assumptions)
     if v.outcome == PROVEN_UNEQUAL:
         return {**base, "outcome": PROVEN_UNEQUAL, "score": 0, "certified": True,
                 "witness": {k: str(val) for k, val in v.witness.items()},
                 "feedback": "Not equivalent to the goal (counterexample found)."}
     if v.outcome == PROVEN_EQUAL:
+        # Partial credit floors at 1 whenever the student got strictly closer to the
+        # target than the source was: `int()` truncation used to round real progress
+        # (say 0.4%) down to a 0 that reads exactly like a wrong answer. A score of 0
+        # here now means only "equivalent, but no measurable progress" — and the
+        # caller must read `outcome`, not `score`, to tell that from PROVEN_UNEQUAL.
+        # With partial credit off the instructor has asked for binary marking.
         d0 = max(1, distance(source, target))
-        score = max(0, min(99, int((1 - distance(final, target) / d0) * 100)))
+        df = distance(final, target)
+        if not partial or df >= d0:
+            score = 0
+        else:
+            score = max(1, min(99, int((1 - df / d0) * 100)))
         return {**base, "outcome": PROVEN_EQUAL, "score": score, "certified": True,
                 "proof": [_step_to_json(s) for s in (v.proof or [])],
                 "feedback": "Equivalent to the goal but not yet in the required form; "

@@ -44,6 +44,17 @@ class Directed:
     conditions: tuple = ()
 
 
+def _guards_ok(dr: Directed, subst: dict, term_of, assumptions: frozenset) -> bool:
+    """Every guard of ``dr`` discharged under ``subst`` -- from the literal bound
+    to it, or from a declared assumption. A guard on a wildcard this direction's
+    pattern does not bind is undecidable, so the rule cannot fire."""
+    for c in dr.conditions:
+        cls = subst.get(c.var)
+        if cls is None or discharge(c, term_of[cls], assumptions) != DISCHARGED:
+            return False
+    return True
+
+
 def directed_rules(rules: list[Rule]) -> list[Directed]:
     out: list[Directed] = []
     for r in rules:
@@ -200,13 +211,16 @@ class ProofEGraph:
     # -- saturation -------------------------------------------------------
     def saturate(self, drules: list[Directed], bound: int,
                  connect: tuple[int, int] | None = None,
-                 max_nodes: int = 60_000) -> None:
+                 max_nodes: int = 60_000,
+                 assumptions: frozenset = frozenset()) -> None:
         """Run bounded equality saturation.
 
         If ``connect=(a, b)`` is given, stop as soon as the two are in the same
         class -- proving needs only enough saturation to *link* the endpoints,
         not a full fixpoint, which keeps the AC/distributivity blow-up at bay.
         ``max_nodes`` is a hard resource bound (the thesis's Section 6.3 concern).
+        ``assumptions`` are the exercise's declared facts, which is what lets a
+        guarded rule fire on a symbolic binding (``x/x -> 1`` under ``x != 0``).
         """
         self.rebuild()
         if connect and self.find(connect[0]) == self.find(connect[1]):
@@ -217,9 +231,8 @@ class ProofEGraph:
             for dr in drules:
                 for i in range(len(self.nodes)):
                     for subst in self._match_node(dr.pattern, i, {}, members):
-                        if dr.conditions and not all(
-                                discharge(c, self.term_of[subst[c.var]]) == DISCHARGED
-                                for c in dr.conditions):
+                        if dr.conditions and not _guards_ok(dr, subst, self.term_of,
+                                                            assumptions):
                             continue
                         applications.append((dr, i, subst))
             did = False
@@ -300,7 +313,8 @@ class ProofStep:
 
 
 def egg_prove(source: MathNode, target: MathNode, rules: list[Rule],
-              bound: int = 30) -> list[ProofStep] | None:
+              bound: int = 30,
+              assumptions: frozenset = frozenset()) -> list[ProofStep] | None:
     """Prove source == target by saturation + provenance explanation.
 
     Returns the rewrite chain (concrete states), or ``None`` if the two are not
@@ -310,7 +324,7 @@ def egg_prove(source: MathNode, target: MathNode, rules: list[Rule],
     eg = ProofEGraph()
     ea = eg.add_term(source)
     eb = eg.add_term(target)
-    eg.saturate(directed_rules(rules), bound, connect=(ea, eb))
+    eg.saturate(directed_rules(rules), bound, connect=(ea, eb), assumptions=assumptions)
     if eg.find(ea) != eg.find(eb):
         return None
     steps = replay_explanation(eg, source, ea, eb, target)
@@ -321,7 +335,8 @@ def egg_prove(source: MathNode, target: MathNode, rules: list[Rule],
     # (bidirectional) step, so search both directions. Every step is re-checked by
     # robust.recheck_proof before it is trusted as a certificate.
     from .hints import shortest_path
-    return shortest_path(source, target, rules, max_depth=max(bound, 12), bidirectional=True)
+    return shortest_path(source, target, rules, max_depth=max(bound, 12),
+                         bidirectional=True, assumptions=assumptions)
 
 
 def _path_valid(term: MathNode, path) -> bool:

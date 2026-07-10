@@ -43,10 +43,18 @@ def grade(request: dict) -> dict:
         res = coq_induction.grade_derivation(ex, sub)
         meta = {"induction": {"var": ex.get("inductionVar"),
                               "status": res.status, "reason": res.reason}}
+        if res.ruleset is not None:
+            meta["ruleset"] = res.ruleset
         if res.status == "certified":
-            return _envelope("proven_equal", 100, True, meta=meta,
+            # `certified: true` owes the caller something re-checkable. The proof is
+            # the Coq file the kernel accepted: run `coqc` on it and you get the same
+            # verdict, independently of this backend.
+            proof = [{"engine": "coq", "method": "induction",
+                      "theorem": coq_induction.THEOREM, "source": res.source}]
+            return _envelope("proven_equal", 100, True, meta=meta, proof=proof,
                              feedback="Certified: every step of your base case and inductive "
-                                      "step is Coq-checked; ∀n. P(n) follows by induction.")
+                                      "step applies a Coq-proven rule; ∀n. P(n) follows by "
+                                      "induction. The accepted Coq source is attached as the proof.")
         if res.status == "invalid":
             return _envelope("invalid_derivation", 0, False, meta=meta,
                              feedback=f"Invalid induction proof: {res.reason}.")

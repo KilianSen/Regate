@@ -30,7 +30,7 @@ from dataclasses import dataclass
 from .backend import equivalent
 from .catalogue import BY_ID, CATALOGUE
 from .rule import Rule
-from .conditions import DISCHARGED, discharge
+from .conditions import DISCHARGED, Assumption, discharge
 from .hints import shortest_path
 from .matching import instantiate, match
 from .model import MathNode, Path
@@ -46,7 +46,8 @@ UNKNOWN = "unknown"
 # ---------------------------------------------------------------------------
 # Trusted kernel: independently re-validate a proof's steps.
 # ---------------------------------------------------------------------------
-def _apply_equality(state: MathNode, rule: Rule, path: Path, forward: bool):
+def _apply_equality(state: MathNode, rule: Rule, path: Path, forward: bool,
+                    assumptions: frozenset[Assumption] = frozenset()):
     """Re-derive one step as an equality move; ``None`` if it isn't legitimate."""
     pattern, template = (rule.lhs, rule.rhs) if forward else (rule.rhs, rule.lhs)
     try:
@@ -56,9 +57,14 @@ def _apply_equality(state: MathNode, rule: Rule, path: Path, forward: bool):
     env = match(pattern, sub)
     if env is None:
         return None
-    # guards must be (literal-)discharged for the equality to hold
-    if not all(discharge(c, env[c.var]) == DISCHARGED for c in rule.conditions):
-        return None
+    # Guards must be discharged for the equality to hold -- from the literals
+    # present, or from a fact the exercise declared. A guard on a wildcard this
+    # direction's pattern does not bind is undecidable, so the step is not a real
+    # rule application (see validate.apply_rule).
+    for c in rule.conditions:
+        binding = env.get(c.var)
+        if binding is None or discharge(c, binding, assumptions) != DISCHARGED:
+            return None
     try:
         new_sub = instantiate(template, env)
     except KeyError:               # template wildcard not bound -> not a real step
@@ -66,13 +72,16 @@ def _apply_equality(state: MathNode, rule: Rule, path: Path, forward: bool):
     return state.replace(path, new_sub)
 
 
-def recheck_proof(source: MathNode, steps, rules: list[Rule] | None = None) -> bool:
+def recheck_proof(source: MathNode, steps, rules: list[Rule] | None = None,
+                  assumptions: frozenset[Assumption] = frozenset()) -> bool:
     """Independently confirm each step is a real, guarded rule application.
 
     Works for both backends' steps (BFS ``Step`` and egg ``ProofStep``); the egg
     direction flag, when present, is honoured but either direction is accepted so
     long as it reproduces the claimed line.  ``rules`` scopes the id lookup to the
     request's ruleset (custom or built-in); defaults to the shipped catalogue.
+    ``assumptions`` are the exercise's declared facts, which is what lets a
+    guarded rule (``x/x -> 1`` under ``x != 0``) appear in a certificate at all.
     """
     by_id = BY_ID if rules is None else {r.id: r for r in rules}
     state = source
@@ -81,9 +90,9 @@ def recheck_proof(source: MathNode, steps, rules: list[Rule] | None = None) -> b
         if rule is None:
             return False
         forward = getattr(st, "forward", True)
-        nxt = _apply_equality(state, rule, st.path, forward)
+        nxt = _apply_equality(state, rule, st.path, forward, assumptions)
         if nxt is None or nxt != st.state:
-            nxt = _apply_equality(state, rule, st.path, not forward)
+            nxt = _apply_equality(state, rule, st.path, not forward, assumptions)
             if nxt is None or nxt != st.state:
                 return False
         state = nxt
@@ -108,11 +117,13 @@ class Verdict:
 def decide_equivalence(a: MathNode, b: MathNode, rules: list[Rule] | None = None, *,
                        disprove_trials: int = 400,
                        bounds: tuple[int, ...] = (5, 8, 12),
-                       max_depth: int = 8) -> Verdict:
+                       max_depth: int = 8,
+                       assumptions: frozenset[Assumption] = frozenset()) -> Verdict:
     rules = CATALOGUE if rules is None else rules
 
-    # 1) sound disproof first (ground truth, cheap)
-    ce = find_counterexample(a, b, disprove_trials)
+    # 1) sound disproof first (ground truth, cheap). Points excluded by the
+    #    exercise's declared assumptions are not counterexamples.
+    ce = find_counterexample(a, b, disprove_trials, assumptions=assumptions)
     if ce is not None:
         return Verdict(PROVEN_UNEQUAL, backend="semantics", witness=ce)
 
@@ -120,19 +131,22 @@ def decide_equivalence(a: MathNode, b: MathNode, rules: list[Rule] | None = None
     #    NB: an empty proof ([]) is a *valid* certificate (already equal), so
     #    test `is not None`, not truthiness.
     for bound in bounds:
-        proof = egg_prove(a, b, rules, bound=bound)
-        if proof is not None and recheck_proof(a, proof, rules):
+        proof = egg_prove(a, b, rules, bound=bound, assumptions=assumptions)
+        if proof is not None and recheck_proof(a, proof, rules, assumptions):
             return Verdict(PROVEN_EQUAL, backend="egg", proof=proof)
     # Bidirectional BFS fallback: reconstructs certificates that need an "uphill"
     # (reverse) step the e-graph linked but its provenance replay couldn't recover.
     # recheck_proof below independently re-validates it, so this only ever turns a
     # genuine equivalence into a certificate — never a false positive.
-    path = shortest_path(a, b, rules, max_depth=max_depth, bidirectional=True)
-    if path is not None and recheck_proof(a, path, rules):
+    path = shortest_path(a, b, rules, max_depth=max_depth, bidirectional=True,
+                         assumptions=assumptions)
+    if path is not None and recheck_proof(a, path, rules, assumptions):
         return Verdict(PROVEN_EQUAL, backend="bfs", proof=path)
 
-    # 3) weaker oracle evidence (no reconstructed certificate)
-    if equivalent(a, b, rules=rules):
+    # 3) weaker oracle evidence (no reconstructed certificate). The egglog theory
+    #    compiles only literal-decidable guards, so it never sees the assumptions;
+    #    that makes it conservative here, never permissive.
+    if equivalent(a, b, rules=rules, bound=max(bounds)):
         return Verdict(EQUAL_NO_CERTIFICATE, backend="oracle")
 
     # 4) honestly unknown
@@ -140,14 +154,16 @@ def decide_equivalence(a: MathNode, b: MathNode, rules: list[Rule] | None = None
 
 
 def grade_robust(student_final: MathNode, target: MathNode,
-                 rules: list[Rule] | None = None) -> tuple[int | None, Verdict]:
+                 rules: list[Rule] | None = None,
+                 assumptions: frozenset[Assumption] = frozenset(),
+                 ) -> tuple[int | None, Verdict]:
     """Grade with explicit handling of the ambiguous case.
 
     Returns ``(score, verdict)``.  ``score`` is ``None`` for UNKNOWN /
     EQUAL_NO_CERTIFICATE -- meaning "do not auto-grade; escalate to review" --
     rather than a false zero or unearned full marks.
     """
-    v = decide_equivalence(student_final, target, rules)
+    v = decide_equivalence(student_final, target, rules, assumptions=assumptions)
     if v.outcome == PROVEN_EQUAL:
         return 100, v
     if v.outcome == PROVEN_UNEQUAL:
