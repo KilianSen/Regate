@@ -247,9 +247,10 @@ def _check_step(state: dict, step: dict, rules: dict[str, Rule], ac: tuple) -> t
         # Correctly applying a false rule proves nothing. The kernel certifies the
         # *goal*, not the ruleset, so an unproven rule can never be composed into a
         # certified verdict — it is honestly inconclusive, not a wrong answer.
+        # (Only reachable under `options.verify_rules`; otherwise rules are trusted.)
         return ("uncertifiable", None,
-                f"{rid} is not proven by the Coq kernel for this request; a step citing "
-                f"an unproven rule cannot be certified")
+                f"{rid} was not proven by the Coq kernel under options.verify_rules; "
+                f"a step citing an unproven rule cannot be certified")
     reverse = step.get("direction") == "reverse"
     if reverse and not rule.bidir:
         return ("invalid", None, f"{rid} is forward-only; cannot apply in reverse")

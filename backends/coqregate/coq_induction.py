@@ -214,14 +214,30 @@ def build_source(ex: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Proving the transmitted ruleset (rules are untrusted exercise data).
+# The ruleset's trust boundary.
 #
-# A step that correctly applies a *false* rule proves nothing, and the induction
-# backstop certifies the goal, not the ruleset — so `1^n = 1` would certify even
-# when the student's step cited `a*b = b`. Every rule therefore gets its own Coq
-# kernel run before it may appear in a certified derivation. A rule Coq cannot
-# prove (or a guarded one, whose side condition we do not model) is simply not
-# proven: a step citing it grades `unknown`, never `invalid` and never certified.
+# Regate's premise: a ruleset is authored and formally validated ONCE, upstream.
+# This backend validates the student's *derivation* against it, so by default it
+# takes the caller's warrant and does not re-prove 29 rules on every submission
+# (~0.35 s of coqc each, and the CLI transport runs cold in a per-submission
+# container).
+#
+# That warrant is only worth what enforces it, so it can be checked here:
+#
+#   * `options.verify_rules` re-establishes it from scratch — each rule gets its
+#     own Coq kernel run. Use it for rules from an untrusted source (a hand-authoring
+#     UI) or in CI.
+#   * a rule carrying a `proof` (a Coq tactic script) is *checked* rather than
+#     searched for — the proof-carrying path, cheap, and how an authoring pipeline
+#     should ship its evidence. Mirrors leanregate's `_carried_source`.
+#
+# Why this matters at all: a step that correctly applies a *false* rule proves
+# nothing, and the induction backstop certifies the goal, not the ruleset — so
+# `1^n = 1` certifies even when the student's step cited `a*b = b`. A rule Coq
+# cannot prove (or a guarded one, whose side condition we do not model) is simply
+# not proven: a step citing it grades `unknown`, never `invalid` — the student
+# followed the rule they were handed. Recursive `definitions` are definitional,
+# hence always trusted.
 # ---------------------------------------------------------------------------
 RULE_THEOREM = "regate_rule"
 
@@ -230,12 +246,24 @@ RULE_THEOREM = "regate_rule"
 class ProvenRule:
     id: str
     proven: bool
-    method: str      # "ring" | "rejected" | "guarded" | "unavailable" | "untranslatable"
+    # "trusted"  -- taken on the caller's warrant (verify_rules off)
+    # "carried"  -- the rule shipped a Coq proof and the kernel accepted it
+    # "ring"     -- the kernel proved it from scratch
+    method: str      # …| "rejected" | "guarded" | "unavailable" | "untranslatable"
     detail: str = ""
 
 
-def build_rule_source(rule: dict, definitions: list[dict] | None = None) -> str:
-    """A standalone Coq file proving `forall vars, lhs == rhs` for one rule."""
+def verify_rules_enabled(ex: dict) -> bool:
+    """Should the transmitted ruleset be re-verified rather than trusted?"""
+    return bool((ex.get("options") or {}).get("verify_rules"))
+
+
+def build_rule_source(rule: dict, definitions: list[dict] | None = None,
+                      tactic: str | None = None) -> str:
+    """A standalone Coq file proving `forall vars, lhs == rhs` for one rule.
+
+    ``tactic`` overrides the automatic tactic with the rule's carried proof script.
+    """
     lhs_node, rhs_node = rule.get("lhs"), rule.get("rhs")
     if not lhs_node or not rhs_node:
         raise InductionError("rule needs lhs and rhs")
@@ -263,6 +291,8 @@ def build_rule_source(rule: dict, definitions: list[dict] | None = None) -> str:
         pow_def = _build_pow_def(definitions or []) + "\n"
 
     forall = f"forall {binders}, " if binders else ""
+    auto = "first [ ring | simpl; ring | field | (field; lia) | (simpl; field) ]"
+    body = tactic if tactic is not None else auto
     return (
         "From Coq Require Import QArith.\n"
         "From Coq Require Import Arith.\n"
@@ -271,8 +301,7 @@ def build_rule_source(rule: dict, definitions: list[dict] | None = None) -> str:
         f"{pow_def}"
         f"Theorem {RULE_THEOREM} : {forall}{lhs} == {rhs}.\n"
         f"Proof.\n"
-        f"  {'intros ' + intro + ';' if intro else ''} "
-        f"first [ ring | simpl; ring | field | (field; lia) | (simpl; field) ].\n"
+        f"  {'intros ' + intro + ';' if intro else ''} {body}.\n"
         f"Qed.\n"
     )
 
@@ -288,15 +317,23 @@ _RULE_CACHE: dict[str, ProvenRule] = {}
 
 
 def prove_rule(rule: dict, definitions: list[dict] | None = None) -> ProvenRule:
-    """Kernel-prove one transmitted rule. Unproven is inconclusive, not false."""
+    """Kernel-prove one transmitted rule. Unproven is inconclusive, not false.
+
+    Prefers the rule's *carried* proof when it has one (checking a supplied script
+    is cheaper than searching for a tactic that works); falls back to the automatic
+    tactic. Only called when `options.verify_rules` is set.
+    """
     rid = str(rule.get("id", "?"))
     if rule.get("conditions"):
         # A guarded rule (`x/x = 1` needing `x != 0`) is not an unconditional
         # equality; we do not model the side condition, so we cannot prove it.
+        # (step_check refuses guarded rules independently, trusted or not.)
         return ProvenRule(rid, False, "guarded",
                           "guarded rules are outside the certifiable fragment")
+
+    carried = rule.get("proof")
     try:
-        source = build_rule_source(rule, definitions)
+        source = build_rule_source(rule, definitions, tactic=carried or None)
     except InductionError as e:
         return ProvenRule(rid, False, "untranslatable", str(e))
 
@@ -307,16 +344,38 @@ def prove_rule(rule: dict, definitions: list[dict] | None = None) -> ProvenRule:
         return ProvenRule(rid, False, "unavailable", "coq toolchain unavailable")
 
     ok, detail = coq_prover.check_source(source)
-    result = (ProvenRule(rid, True, "ring") if ok
-              else ProvenRule(rid, False, "rejected", detail[:400]))
+    if ok:
+        result = ProvenRule(rid, True, "carried" if carried else "ring")
+    elif carried:
+        # The author's own script did not check. Try to prove it anyway before
+        # calling the rule unproven — a stale proof should not fail a sound rule.
+        try:
+            ok2, detail2 = coq_prover.check_source(build_rule_source(rule, definitions))
+        except InductionError as e:
+            ok2, detail2 = False, str(e)
+        result = (ProvenRule(rid, True, "ring", "carried proof rejected; auto-proved instead")
+                  if ok2 else ProvenRule(rid, False, "rejected", detail2[:400]))
+    else:
+        result = ProvenRule(rid, False, "rejected", detail[:400])
     _RULE_CACHE[key] = result
     return result
 
 
 def prove_ruleset(ex: dict) -> dict[str, ProvenRule]:
-    """Prove every rule in `exercise.ruleset`, keyed by rule id."""
+    """Establish the ruleset's soundness, keyed by rule id.
+
+    By default this is the caller's warrant, not a kernel run: Regate's premise is
+    that a ruleset is authored and formally validated upstream, and this backend
+    grades derivations against it. `options.verify_rules` re-establishes it here.
+    """
+    rules = ex.get("ruleset") or []
+    if not verify_rules_enabled(ex):
+        return {str(r.get("id")): ProvenRule(
+            str(r.get("id")), True, "trusted",
+            "ruleset warranted valid by the caller; set options.verify_rules to re-prove")
+            for r in rules}
     defs = ex.get("definitions") or []
-    return {str(r.get("id")): prove_rule(r, defs) for r in (ex.get("ruleset") or [])}
+    return {str(r.get("id")): prove_rule(r, defs) for r in rules}
 
 
 # ---------------------------------------------------------------------------

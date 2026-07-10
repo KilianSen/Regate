@@ -200,11 +200,21 @@ def test_certified_carries_a_recheckable_proof():
     assert resp["meta"]["rechecked"] is False       # honest: no independent re-check
 
 
-def test_unsound_rule_is_never_certified():
-    # The bug this pins: cvc5 certifies the GOAL, not the ruleset. With a true goal
-    # (1ⁿ = 1) and a step citing the FALSE rule `a·b = b`, correctly applied,
-    # cvc5regate used to return proven_equal/100/certified. An unproven rule must
-    # make the derivation `unknown` — inconclusive, not a wrong answer.
+def test_ruleset_is_trusted_by_default():
+    # Regate's premise: the ruleset is authored and formally validated upstream, so
+    # the grading path takes the caller's warrant. No solver call is spent on rules.
+    fake = _install(lambda s, a: ("unknown", "") if "--fmf-fun" in a else ("unsat", ""))
+    resp = grade.grade(_ind_req(_sub(VALID_BASE, VALID_STEP)))
+    assert resp["outcome"] == "proven_equal" and resp["certified"]
+    assert resp["meta"]["ruleset"]["mul_one_left"]["method"] == "trusted"
+    # every solver call carried a flag: none was the bare rule-validity query
+    assert all(args for _, args in fake.calls)
+
+
+def test_verify_rules_rejects_an_unsound_rule():
+    # With verify_rules on, the warrant is re-established here. cvc5 certifies the
+    # GOAL (1ⁿ = 1, true) but refutes the FALSE rule `a·b = b` the step cites — so
+    # the derivation is `unknown`, inconclusive, not a wrong answer.
     unsound = [{"id": "drop_left", "lhs": mul(wd("a"), wd("b")), "rhs": wd("b"),
                 "bidirectional": False, "conditions": []}]
     step = [dict(s) for s in VALID_STEP]
@@ -217,7 +227,9 @@ def test_unsound_rule_is_never_certified():
             return ("unsat", "")                    # the goal itself is true
         return ("sat", "")                          # ...but the rule is refutable
     _install(respond)
-    resp = grade.grade(_ind_req(_sub(VALID_BASE, step), ruleset=unsound))
+    req = _ind_req(_sub(VALID_BASE, step), ruleset=unsound)
+    req["exercise"] = {**req["exercise"], "options": {"verify_rules": True}}
+    resp = grade.grade(req)
     assert resp["outcome"] == "unknown" and resp["score"] is None and not resp["certified"]
     assert resp["meta"]["ruleset"]["drop_left"]["proven"] is False
 

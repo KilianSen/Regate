@@ -140,6 +140,25 @@ def _moves_from_steps(steps, by_id, hyps) -> list[Move]:
     return moves
 
 
+def _audit_if_requested(rules, opts, custom: bool) -> None:
+    """Re-establish the ruleset's soundness, if the request asks for it.
+
+    A transmitted ruleset is trusted by default — Regate's premise is that it was
+    authored and formally validated upstream, and this backend grades derivations
+    against it. `verify_rules` (the protocol-wide name the formal backends also
+    honour; `audit_rules` is eggregate's older spelling) re-checks it here, so an
+    instructor rule that lies — `x/x -> 1` without `x != 0` — is rejected with a
+    counterexample before it can grade anything. Eggregate has no kernel, so its
+    check is the random-rational fuzzer rather than a proof.
+    """
+    if not custom or not (opts.get("verify_rules") or opts.get("audit_rules")):
+        return
+    for a in audit_catalogue(rules, trials=opts.get("audit_trials", 400)):
+        if not a.sound:
+            wit = ", ".join(f"{k}={v}" for k, v in a.counterexample.items())
+            raise RequestError(f"unsound rule {a.rule_id!r}: counterexample {wit}")
+
+
 def _parse_assumptions(ex) -> frozenset:
     """Student/instructor-declared facts that discharge guarded side conditions,
     e.g. {"kind": "nonzero", "value": <MathNode for x>} for "x != 0"."""
@@ -237,11 +256,15 @@ def _grade_induction(ex, sub) -> dict:
     if not name:
         raise RequestError("induction mode requires exercise.inductionVar")
 
-    rules, _, _ = _resolve_rules(ex)
+    rules, _, custom = _resolve_rules(ex)
     try:
         defs = ruleset_from_json(ex.get("definitions") or [])
     except (ValueError, KeyError, TypeError) as e:
         raise RequestError(f"invalid definitions: {e}")
+    # Same trust boundary as the equational path: a transmitted ruleset is taken on
+    # the caller's warrant unless the request asks us to re-establish it. Recursive
+    # `definitions` are definitional and are never fuzzed.
+    _audit_if_requested(rules, ex.get("options") or {}, custom)
     by_id = {**{r.id: r for r in rules}, **{d.id: d for d in defs}}
     assumptions = _parse_assumptions(ex)
 
@@ -306,15 +329,7 @@ def grade(request: dict) -> dict:
     rules, by_id, custom = _resolve_rules(ex)
     opts = ex.get("options") or {}
 
-    # Custom rules are untrusted: optionally audit them for soundness here, so an
-    # instructor-authored rule that lies (e.g. x/x->1 without x!=0) is rejected
-    # before it can grade anything. (Authoring-time is the better place; this is
-    # the per-request safety net.)
-    if custom and opts.get("audit_rules"):
-        for a in audit_catalogue(rules, trials=opts.get("audit_trials", 400)):
-            if not a.sound:
-                wit = ", ".join(f"{k}={v}" for k, v in a.counterexample.items())
-                raise RequestError(f"unsound rule {a.rule_id!r}: counterexample {wit}")
+    _audit_if_requested(rules, opts, custom)
 
     if "source" not in ex:
         raise RequestError("exercise.source is required")

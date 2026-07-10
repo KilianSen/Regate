@@ -61,9 +61,11 @@ Expressions use the persisted **MathNode** JSON shape (Artemis
     // ac_normalization (default false): treat +/· as associative-commutative when
     //   deciding equivalence and "reached the target form" — never for step
     //   legality, where a derivation must still cite the rule it used.
+    // verify_rules (default false): do not take the caller's warrant on
+    //   `ruleset` — re-establish it (see "The ruleset's trust boundary").
     "options": { "partial_credit": true, "bound": 5, "want_hint": false,
                  "ac_normalization": false,
-                 "audit_rules": false, "audit_trials": 400 }
+                 "verify_rules": false, "audit_rules": false, "audit_trials": 400 }
   },
   "submission": {
     "final": <MathNode> | null,           // student's final expression, and/or
@@ -127,25 +129,56 @@ contain **wildcards** — `{"type":"wild","value":"a"}` — matching any subtree
   "bidirectional": false,                  // true = usable in reverse
   "conditions": [ { "kind": "nonzero" | "positive" | "integer"
                           | "constant" | "notequal",
-                    "var": "c", "arg": 0 } ]   // arg only for "notequal"
+                    "var": "c", "arg": 0 } ],  // arg only for "notequal"
+
+  // Optional authoring-time evidence: an engine-specific proof script the backend
+  // CHECKS instead of searching for one (Lean tactic block / Coq tactic script).
+  // Honoured under `options.verify_rules`; a stale script falls back to auto-proof.
+  "proof": "intros; ring"
 }
 ```
 
-**Custom rules are untrusted.** A backend SHOULD be able to audit a supplied
-ruleset for soundness (Eggregate: `options.audit_rules` runs the random-rational
-fuzzer and rejects any rule that is not a definedness-preserving equality, with a
-counterexample). Authoring-time auditing is preferred; per-request is the safety
-net.
+### The ruleset's trust boundary
 
-**Every formal backend MUST prove each transmitted rule before certifying with
-it.** This is not optional, and it is not implied by kernel-checking the goal: a
-kernel that certifies only `∀n. 1ⁿ = 1` will happily certify a derivation whose
-step cites the false rule `a·b = b`, correctly applied. Applying a false rule
-correctly proves nothing. A rule the kernel cannot prove — including a *guarded*
-rule, whose side condition the formal backends do not model — is **unproven, not
-false**: a step citing it grades `unknown` (route to review), never
-`invalid_derivation`. Recursive `definitions` are definitional and therefore
-trusted; algebraic rules are not.
+**A ruleset is authored and formally validated once, upstream.** The backends
+validate the student's *derivation* against it. So by default a backend takes the
+caller's warrant on `exercise.ruleset` and does not re-establish it per
+submission — that is Regate's premise, and re-proving a 29-rule ruleset on every
+grade would cost seconds of kernel time in a per-submission container.
+
+**The caller warrants that `exercise.ruleset` is sound.** That warrant is
+load-bearing, because a backend cannot recover it from anything else it checks. A
+kernel that certifies the goal `∀n. 1ⁿ = 1` will certify a derivation whose step
+cites the *false* rule `a·b = b`, correctly applied: the goal check and the step
+check are each sound, and their composition proves nothing, because applying a
+false rule correctly proves nothing. There is no verdict a backend can compute
+that repairs a bad ruleset.
+
+Two ways to discharge the warrant instead of assuming it:
+
+- **`options.verify_rules`** — re-establish it at request time. Eggregate runs the
+  random-rational fuzzer and rejects the request with a counterexample (`unsound
+  rule 'frac_self_one': counterexample a=0`). The formal backends prove each rule
+  with their kernel. Use this for rules from an untrusted source (a hand-authoring
+  UI), or in CI. `options.audit_rules` is eggregate's older spelling.
+- **A rule may carry its own `proof`** — an engine-specific proof script. The
+  backend *checks* the supplied proof rather than searching for one, which is what
+  an authoring pipeline should ship. Leanregate (`_carried_source`) and coqregate
+  support this; cvc5 cannot, as it has no exportable proof for this fragment.
+
+A rule the kernel cannot prove — including a *guarded* rule, whose side condition
+the formal backends do not model — is **unproven, not false**. A step citing it
+grades `unknown` (route to review), never `invalid_derivation`: the student
+applied the rule they were handed, and it is the exercise that is broken.
+
+Recursive `definitions` are definitional and therefore **always** trusted, in
+every mode and whatever `verify_rules` says. They are the slot for "this is true
+by declaration"; `ruleset` is not.
+
+Leanregate is a special case: its step certificate *is* a Lean lemma proven per
+rule, so it must prove the ruleset to grade at all. Trusting is not an option it
+has, and it answers `unknown` for a rule it cannot prove regardless of
+`verify_rules`.
 
 ## GradeResponse
 

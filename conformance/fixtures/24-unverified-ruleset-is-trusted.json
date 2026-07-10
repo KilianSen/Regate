@@ -1,6 +1,6 @@
 {
-  "name": "24-induction-unsound-rule-not-certified",
-  "description": "The goal 1^n = 1 is TRUE, but the inductive step cites the FALSE rule a*b = b (a=2,b=1 refutes it), correctly applied. A kernel that certifies only the GOAL would award a certified 100. Every formal backend must prove the transmitted ruleset and answer `unknown`. This holds with or without the toolchain installed: an absent prover cannot prove the rule either, so the fixture never skips.",
+  "name": "24-unverified-ruleset-is-trusted",
+  "description": "The trust boundary, asserted rather than assumed. The goal 1^n = 1 is TRUE but the inductive step cites the FALSE rule a*b = b (a=2,b=1 refutes it), correctly applied. Regate's premise is that a ruleset is authored and formally validated upstream, so by default the backends grade the DERIVATION and take the caller's warrant on the rules: coqregate/cvc5regate certify. This is the documented contract, not an oversight -- fixture 25 is the same request with options.verify_rules and must NOT certify. leanregate differs by construction: its step certificate IS a Lean lemma per rule, so it cannot grade a rule it never proved, and answers unknown either way.",
   "request": {
     "protocol": "1.0",
     "exercise": {
@@ -332,14 +332,18 @@
       "certified": false
     },
     "coqregate": {
-      "outcome": "unknown",
-      "score": null,
-      "certified": false
+      "outcome": "proven_equal",
+      "score": 100,
+      "certified": true,
+      "has_proof": true,
+      "requires": "coqc"
     },
     "cvc5regate": {
-      "outcome": "unknown",
-      "score": null,
-      "certified": false
+      "outcome": "proven_equal",
+      "score": 100,
+      "certified": true,
+      "has_proof": true,
+      "requires": "cvc5"
     }
   }
 }

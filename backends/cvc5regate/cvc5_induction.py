@@ -337,20 +337,37 @@ def build_source(ex: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Proving the transmitted ruleset (rules are untrusted exercise data).
+# The ruleset's trust boundary.
 #
-# cvc5's induction certifies the *goal*, not the ruleset, so a derivation whose
-# steps cite a false rule (`a*b = b`) would otherwise certify any true goal. Each
-# transmitted rule therefore becomes its own SMT validity query before it may
-# appear in a certified derivation. Unproven is inconclusive (→ `unknown`), never
-# `invalid`. Recursive `definitions` are definitional, hence trusted.
+# Regate's premise: a ruleset is authored and formally validated ONCE, upstream.
+# This backend validates the student's *derivation* against it, so by default it
+# takes the caller's warrant rather than re-proving every rule per submission.
+# `options.verify_rules` re-establishes it here — each rule becomes its own SMT
+# validity query. Use it for rules from an untrusted source, or in CI.
+#
+# Why it matters: cvc5's induction certifies the *goal*, not the ruleset, so a
+# derivation whose steps cite a false rule (`a*b = b`) would otherwise certify any
+# true goal. Unproven is inconclusive (→ `unknown`), never `invalid` — the student
+# followed the rule they were handed. Recursive `definitions` are definitional,
+# hence always trusted.
+#
+# Unlike coqregate/leanregate there is no proof-carrying path: an author cannot
+# ship an SMT proof for cvc5 to check, because cvc5 1.3.x cannot export one for
+# the quantified fragment. Verification here always means re-solving.
 # ---------------------------------------------------------------------------
 @dataclass
 class ProvenRule:
     id: str
     proven: bool
-    method: str      # "smt" | "rejected" | "guarded" | "unavailable" | "untranslatable"
+    # "trusted" -- taken on the caller's warrant (verify_rules off)
+    # "smt"     -- re-solved here and proven
+    method: str      # …| "rejected" | "guarded" | "unavailable" | "untranslatable"
     detail: str = ""
+
+
+def verify_rules_enabled(ex: dict) -> bool:
+    """Should the transmitted ruleset be re-verified rather than trusted?"""
+    return bool((ex.get("options") or {}).get("verify_rules"))
 
 
 def _mentions(node: dict, types: tuple[str, ...]) -> bool:
@@ -424,8 +441,19 @@ def prove_rule(rule: dict, ex: dict) -> ProvenRule:
 
 
 def prove_ruleset(ex: dict) -> dict[str, ProvenRule]:
-    """Prove every rule in `exercise.ruleset`, keyed by rule id."""
-    return {str(r.get("id")): prove_rule(r, ex) for r in (ex.get("ruleset") or [])}
+    """Establish the ruleset's soundness, keyed by rule id.
+
+    By default this is the caller's warrant, not a solver run: Regate's premise is
+    that a ruleset is authored and formally validated upstream, and this backend
+    grades derivations against it. `options.verify_rules` re-establishes it here.
+    """
+    rules = ex.get("ruleset") or []
+    if not verify_rules_enabled(ex):
+        return {str(r.get("id")): ProvenRule(
+            str(r.get("id")), True, "trusted",
+            "ruleset warranted valid by the caller; set options.verify_rules to re-prove")
+            for r in rules}
+    return {str(r.get("id")): prove_rule(r, ex) for r in rules}
 
 
 # ---------------------------------------------------------------------------

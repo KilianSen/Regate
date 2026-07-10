@@ -201,28 +201,67 @@ def test_certified_carries_a_recheckable_proof():
     assert f"Theorem {coq_induction.THEOREM}" in proof[0]["source"] and "Qed." in proof[0]["source"]
 
 
-def test_unsound_rule_is_never_certified():
-    # The bug this pins: the Coq kernel certifies the GOAL, not the ruleset. With a
-    # true goal (1ⁿ = 1) and a step citing the FALSE rule `a·b = b`, correctly applied,
-    # coqregate used to return proven_equal/100/certified. An unproven rule must make
-    # the derivation `unknown` — inconclusive, not a wrong answer.
-    unsound = [{"id": "drop_left", "lhs": mul(wd("a"), wd("b")), "rhs": wd("b"),
-                "bidirectional": False, "conditions": []}]
+UNSOUND = [{"id": "drop_left", "lhs": mul(wd("a"), wd("b")), "rhs": wd("b"),
+            "bidirectional": False, "conditions": []}]
+
+
+def _unsound_step():
     step = [dict(s) for s in VALID_STEP]
     step[2] = dict(step[2], rule="drop_left")
-    # The kernel accepts the induction goal but rejects the rule's own theorem.
+    return step
+
+
+def _verify(req):
+    req["exercise"]["options"] = {"verify_rules": True}
+    return req
+
+
+def test_ruleset_is_trusted_by_default():
+    # Regate's premise: the ruleset is authored and formally validated upstream, so
+    # the grading path takes the caller's warrant and does not re-prove it. No coqc
+    # run is spent on the rules — only on the induction goal.
+    fake = _install(lambda src: True)
+    resp = grade.grade(_ind_req(_sub(VALID_BASE, VALID_STEP)))
+    assert resp["outcome"] == "proven_equal" and resp["certified"]
+    assert resp["meta"]["ruleset"]["mul_one_left"]["method"] == "trusted"
+    assert all(f"Theorem {coq_induction.RULE_THEOREM}" not in s for s in fake.calls)
+
+
+def test_verify_rules_rejects_an_unsound_rule():
+    # With verify_rules on, the warrant is re-established here. The Coq kernel
+    # certifies the GOAL (1ⁿ = 1, true) but rejects the FALSE rule `a·b = b` the
+    # step cites — so the derivation is `unknown`, inconclusive, not a wrong answer.
+    # Without this, correctly applying a false rule to reach a true goal certifies.
     _install(lambda src: f"Theorem {coq_induction.RULE_THEOREM}" not in src)
-    resp = grade.grade(_ind_req(_sub(VALID_BASE, step), ruleset=unsound))
+    resp = grade.grade(_verify(_ind_req(_sub(VALID_BASE, _unsound_step()), ruleset=UNSOUND)))
     assert resp["outcome"] == "unknown" and resp["score"] is None and not resp["certified"]
     assert resp["meta"]["ruleset"]["drop_left"]["proven"] is False
 
 
-def test_proven_rule_is_certified():
-    # ...and the same shape with a rule the kernel *does* prove still certifies.
+def test_verify_rules_still_certifies_a_sound_rule():
     _install(lambda src: True)
-    resp = grade.grade(_ind_req(_sub(VALID_BASE, VALID_STEP)))
+    resp = grade.grade(_verify(_ind_req(_sub(VALID_BASE, VALID_STEP))))
     assert resp["outcome"] == "proven_equal" and resp["certified"]
+    assert resp["meta"]["ruleset"]["mul_one_left"]["method"] == "ring"
+
+
+def test_carried_proof_is_checked_not_searched():
+    # An authoring pipeline ships its evidence with the rule; the kernel checks the
+    # supplied script instead of hunting for a tactic that works.
+    carried = [dict(RULESET[0], proof="intros; ring")]
+    fake = _install(lambda src: True)
+    resp = grade.grade(_verify(_ind_req(_sub(VALID_BASE, VALID_STEP), ruleset=carried)))
+    assert resp["meta"]["ruleset"]["mul_one_left"]["method"] == "carried"
+    assert any("intros; ring" in s for s in fake.calls)
+
+
+def test_stale_carried_proof_falls_back_to_auto():
+    # A carried proof that no longer checks must not fail an otherwise sound rule.
+    fake = _install(lambda src: "bogus_tactic" not in src)
+    carried = [dict(RULESET[0], proof="bogus_tactic")]
+    resp = grade.grade(_verify(_ind_req(_sub(VALID_BASE, VALID_STEP), ruleset=carried)))
     assert resp["meta"]["ruleset"]["mul_one_left"]["proven"] is True
+    assert resp["meta"]["ruleset"]["mul_one_left"]["method"] == "ring"
 
 
 def test_grade_induction_invalid_wrong_result():
