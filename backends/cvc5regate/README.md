@@ -15,17 +15,35 @@ concrete numeric witness. Its footprint is a **single ~21 MB solver binary**
 
 ## How it works
 
-The induction `GradeRequest` (`mode: "induction"`) — the `∀n. P(n)` goal, the
-induction variable, and the trusted recursive `definitions` — is translated to
-**SMT-LIB 2.6** and handed to **cvc5** (`cvc5_induction.py` + `cvc5_prover.py`,
-the single solver seam). Two solver calls, in disprove-first / prove-second order:
+On `mode: "induction"` cvc5regate grades the **student's derivation**, not just
+the bare theorem. `grade_derivation` runs three stages (`cvc5_induction.py` +
+`cvc5_prover.py`, the single solver seam):
 
-1. **Disprove** (cheap, first): the induction variable is a *free* constant and
+1. **Disprove first** (cheap): the induction variable is a *free* constant and
    cvc5's recursive-function model finder (`--fmf-fun`) searches for a
-   counterexample. `sat` + a model ⇒ `proven_unequal` with the model as a numeric
-   `witness`.
-2. **Prove**: the *negated, universally-quantified* goal with cvc5's structural
-   induction (`--quant-ind`). `unsat` ⇒ the theorem holds.
+   counterexample to the goal. `sat` + a model ⇒ `proven_unequal` with the model
+   as a numeric `witness` — returned straight away, before any step grading, so a
+   false goal is caught even under a garbage derivation.
+2. **Grade the steps**: each step of the `base` (P(0)) and inductive `step`
+   (P(S n), with P(n) available) must be a valid instance of a transmitted rule
+   (`step_check`, strict), and both obligations must reduce to a reflexive `t = t`.
+   A fabricated step ⇒ `invalid_derivation`.
+3. **Backstop the leap**: the *negated, universally-quantified* goal with cvc5's
+   structural induction (`--quant-ind`). `unsat` ⇒ the theorem holds ⇒
+   `proven_equal` / `certified`, with the emitted SMT-LIB attached as the `proof`.
+
+### The ruleset is trusted by default
+
+The transmitted `ruleset` is the caller's responsibility, validated upstream (see
+the trust boundary in the [contract](../../GRADING_PROTOCOL.md)); cvc5regate grades
+the derivation against it without re-proving it. `options.verify_rules` turns each
+rule into its own SMT validity query first — an unsound rule then makes a step
+citing it `unknown` (never `invalid_derivation`). Per-rule status is in
+`meta.ruleset`. There is no proof-carrying path — a rule's `proof` field is ignored
+(cvc5 cannot export a re-checkable proof for this fragment anyway). Recursive
+`definitions` are always trusted. Certifying the goal alone does **not** vouch for
+the rules: a false rule correctly applied to a true goal is `unknown`, never
+certified.
 
 ### Why ℕ is a datatype, not `Int`
 
@@ -91,7 +109,11 @@ toolchain-absent ⇒ `unknown`. Non-induction modes are out of scope and return
 - `cvc5_induction.py` — translates the induction request to SMT-LIB 2.6 (type
   inference, `define-fun-rec` definitions, negated-forall prove / free-const
   disprove sources) and maps the solver verdicts to protocol outcomes.
-  `certify(ex) -> CertifyResult`.
+  `grade_derivation(ex, sub)` is the grading path (disprove-first, grade the
+  student's steps, backstop the leap); `certify(ex)` is the bare-goal oracle it
+  calls; `prove_ruleset(ex)` re-solves the ruleset under `verify_rules`.
+- `step_check.py` — strict rule-instance checker for the student's steps (shared
+  shape with coqregate's, but a deliberately independent copy).
 - `grade.py` — protocol entrypoint (CLI + HTTP), `backend = "cvc5regate"`.
 - `check_induction.py` — live harness; `--require-cvc5` runs the emitted goals
   through real cvc5 and asserts the MUST_PASS set settles.

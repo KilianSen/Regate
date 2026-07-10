@@ -14,16 +14,33 @@ fetch or build.
 
 ## What it does
 
-On `mode: "induction"` it translates the goal `∀n. P(n)` and the transmitted
-recursive `definitions` into a Coq `.v` file — a `Fixpoint pw (a:Q)(n:nat) : Q`,
-a `Theorem regate_induction : forall …, lhs == rhs`, and a `Proof. intros …;
-induction n as [| k ih]; … Qed.` script using `simpl`/`ring` — and
-**kernel-checks it** with `coqc` (or `rocq compile`).
+On `mode: "induction"` it grades the **student's derivation**, not just the bare
+theorem. Each submitted step of the `base` (P(0)) and inductive `step` (P(S n),
+with the hypothesis P(n) available) must be a valid instance of a transmitted rule
+(`step_check`, strict — a value-equal state reached by any other means is
+rejected), and both obligations must reduce to a reflexive `t = t`. Only then does
+Coq **backstop the `∀n` leap**: it translates the goal + recursive `definitions`
+into a `.v` file — a `Fixpoint pw (a:Q)(n:nat) : Q`, a `Theorem regate_induction :
+forall …, lhs == rhs`, and a `Proof. intros …; induction n as [| k ih]; … Qed.`
+script — and **kernel-checks it** with `coqc` (or `rocq compile`).
 
-Honest by construction (the protocol's contract): Coq accepts → `proven_equal` /
-`certified: true`; Coq rejects, the goal is outside the supported fragment, or the
-toolchain is absent → `unknown` (honestly inconclusive, never a false grade).
-Non-induction modes are out of scope and return `unknown`.
+Honest by construction (the protocol's contract): every step valid and Coq accepts
+the leap → `proven_equal` / `certified: true`, with the accepted Coq source
+attached as the `proof`. A fabricated step → `invalid_derivation`. A step citing a
+rule outside the certifiable fragment, a goal Coq rejects, a half-empty
+submission, or an absent toolchain → `unknown` (honestly inconclusive, never a
+false grade). Non-induction modes are out of scope and return `unknown`.
+
+### The ruleset is trusted by default
+
+The transmitted `ruleset` is the caller's responsibility, validated upstream (see
+the trust boundary in the [contract](../../GRADING_PROTOCOL.md)); coqregate grades
+the derivation against it without re-proving it. Set `options.verify_rules` to
+have each rule kernel-proven here first with an automatic tactic — an unsound rule
+then makes a step citing it `unknown` (never `invalid_derivation`; the student
+applied the rule they were handed). Per-rule status is reported in `meta.ruleset`.
+Regate never runs a caller-supplied proof script, so a rule's `proof` field is
+ignored. Recursive `definitions` are always trusted.
 
 ### Supported fragment (first slice)
 
@@ -43,19 +60,28 @@ only one `ring`/`field` can discharge.
 
 ## Trust model
 
-`certified: true` rests on the **Coq kernel**: the emitted `.v` is checked by
-`coqc`, and only a `Qed.`-accepted proof term is treated as a certificate (the
-certificate is the kernel-checked Coq source). A reject, an out-of-fragment goal,
-or an absent toolchain all yield `unknown`, never a false grade.
+`certified: true` rests on **two** things: every student step is a valid instance
+of a transmitted rule (`step_check`), and the **Coq kernel** accepts the `∀n`
+induction proof of the goal (`coqc`, `Qed.`). The certificate attached as `proof`
+is the kernel-checked Coq source. Rule *soundness* is the caller's upstream
+responsibility, not re-checked at grade time unless `options.verify_rules` asks —
+kernel-checking the goal alone does **not** vouch for the rules, so a false rule
+correctly applied to a true goal is `unknown`, never certified. A reject, an
+out-of-fragment goal, a bad step, or an absent toolchain all yield the honest
+outcome, never a false grade.
 
 ## Files
 
 - `coq_prover.py` — the kernel seam: `coq_available()` (looks for `coqc`/`rocq`)
   and `check_source(source) -> (ok, detail)` which compiles a generated `.v` in a
   scratch dir, content-hash cached. stdlib-only Python.
-- `coq_induction.py` — translates the induction request to Coq, emits the
-  `induction n` proof, and certifies it via `coq_prover`. `certify(ex) ->
-  CertifyResult`.
+- `coq_induction.py` — translates the induction request to Coq and emits the
+  `induction n` proof. `grade_derivation(ex, sub)` is the grading path (grade the
+  student's base/step steps, then backstop the leap); `certify(ex)` is the
+  bare-goal oracle it calls; `prove_ruleset(ex)` re-proves the ruleset under
+  `verify_rules`.
+- `step_check.py` — strict rule-instance checker for the student's steps (shared
+  shape with cvc5regate's, but a deliberately independent copy).
 - `grade.py` — protocol entrypoint (CLI + HTTP), `backend = "coqregate"`.
 - `check_induction.py` — live-kernel CI harness; feeds the emitted proofs through
   real `coqc`/`rocq` and asserts the MUST_PASS goals compile.

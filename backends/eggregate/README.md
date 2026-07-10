@@ -72,10 +72,14 @@ false grade.
 **The ruleset travels in the request, not the binary.** An exercise supplies its
 own rules inline (`exercise.ruleset`: full pattern/template/guard definitions
 with wildcards) or references the built-in catalogue by id (`exercise.rules`).
-This realises the thesis's instructor-authored rules (§6.3). Because custom rules
-are untrusted, `options.audit_rules` runs the soundness fuzzer on them and
+This realises the thesis's instructor-authored rules (§6.3). The ruleset is
+authored and validated **upstream** (a code contribution, reviewed + CI-checked),
+so eggregate **trusts it by default** and grades the derivation against it. To
+re-check anyway — a not-yet-trusted source, or CI — set `options.verify_rules`
+(`options.audit_rules` is the older spelling): the soundness fuzzer runs and
 **rejects an unsound rule with a counterexample** (e.g. `x/x → 1` without `x ≠ 0`)
-before it can grade anything.
+before it can grade anything. The built-in catalogue is only eggregate's own
+test/demo/gate fixture, not the production rule source.
 
 ## Layout — and how it maps to the thesis
 

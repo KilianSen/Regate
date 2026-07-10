@@ -17,17 +17,18 @@ never a false grade.
 ## Pieces
 
 - `lean_prover.py` — the **runtime prover**. A transmitted `exercise.ruleset`
-  (authored by a *trusted* instructor) is proven **per rule** by a Lean kernel in
-  the container. Hybrid: *auto-prove* by translating the MathNode `lhs`/`rhs` (+
-  `conditions` as hypotheses) into a `ℚ`-identity goal and discharging it with
-  `field_simp; ring` (a sound rule proves itself; an unsound one — a missing `≠ 0`
-  guard — is **rejected**); else *proof-carrying*, kernel-checking a `proof`
-  tactic block the rule may ship (for rules outside the ring/field fragment). A
-  rule Lean accepts certifies steps under it; one it rejects, or one with no
-  proof, is dropped — steps using it grade `unknown`. Per-rule outcomes are
-  reported in `meta.ruleset`. It calls `lean` directly against a pruned Mathlib
-  (`prune_lake.py`); without the toolchain (e.g. the Lean-free conformance CLI)
-  nothing can be proven, so rule-based grading degrades to `unknown`.
+  (authored upstream by a *trusted* contributor) is proven **per rule** by a Lean
+  kernel in the container: the MathNode `lhs`/`rhs` (+ `conditions` as hypotheses)
+  is translated into a `ℚ`-identity goal and discharged with `field_simp; ring`
+  (a sound rule proves itself; an unsound one — a missing `≠ 0` guard — is
+  **rejected**). A rule outside that automatic fragment (e.g. a relational `iff`
+  rewrite) is simply unproven; Regate does **not** run a caller-supplied proof
+  script (an injection surface), so a rule's `proof` field is ignored. A rule Lean
+  accepts certifies steps under it; one it cannot prove is dropped — steps using
+  it grade `unknown`. Per-rule outcomes are reported in `meta.ruleset`. It calls
+  `lean` directly against a pruned Mathlib (`prune_lake.py`); without the toolchain
+  (e.g. the Lean-free conformance CLI) nothing can be proven, so rule-based grading
+  degrades to `unknown`.
 - `grade.py` + `lean_check.py` — the protocol-conforming entrypoint (CLI + HTTP),
   `backend = "leanregate"`. `grade._prove_ruleset` proves the transmitted ruleset;
   `lean_check` is the formal step-checker that certifies a submitted derivation by
@@ -50,6 +51,13 @@ of a kernel-proven rule (and, for induction, the `Nat.rec` leap kernel-checks).
 The certificate is the set of Lean lemma names plus the proof term Lean accepted.
 Without the toolchain present, nothing is proven and rule-based grading is
 `unknown`.
+
+Leanregate is the **exception** to Regate's trust-by-default rule (see the
+[contract](../../GRADING_PROTOCOL.md)'s trust boundary): its step certificate *is*
+a per-rule Lean lemma, so it cannot trust a rule and still emit a certificate — it
+always proves. There is therefore no `options.verify_rules` here; proving is the
+mechanism, not an opt-in. A rule outside the automatic fragment is unproven and
+grades `unknown`, whatever the caller requests.
 
 ## Run / deploy
 
