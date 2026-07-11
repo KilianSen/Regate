@@ -1,0 +1,33 @@
+name: contribution-badge
+
+on:
+  push: { branches: [main] }
+  workflow_dispatch:
+
+jobs:
+  badge:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write          # to push the regenerated SVG back
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0        # full history — from..to needs it
+      - uses: actions/setup-node@v5
+        with: { node-version: 22 }
+      - name: Generate badge
+        run: |
+          mkdir -p docs
+          # --from is omitted on purpose: it is optional and defaults to the whole
+          # history (root commit included). fetch-depth: 0 above gives gitproof the
+          # full history it needs to walk back to the beginning.
+          npx --yes git+https://github.com/KilianSen/gitproof.git \
+            --repo . --to HEAD \
+            --user "${{ github.actor }}" --out docs/contrib.svg
+      - name: Commit badge if changed
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/contrib.svg
+          git diff --cached --quiet || git commit -m "chore: update contribution badge"
+          git push origin HEAD:main
