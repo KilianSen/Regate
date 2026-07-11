@@ -147,3 +147,6 @@ breaks the contract fails CI. The contract and the examples live once.
 
 See each backend's README for internals; eggregate's `backends/eggregate/docs/`
 covers scaling and limitations.
+
+## Contribution Observability
+<object data="https://github.com/KilianSen/Regate/blob/main/docs/contrib.svg"></object>
