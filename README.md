@@ -148,5 +148,9 @@ breaks the contract fails CI. The contract and the examples live once.
 See each backend's README for internals; eggregate's `backends/eggregate/docs/`
 covers scaling and limitations.
 
-## Contribution Observability
-![ontribution](/docs/contrib.svg)
+## Contribution observability
+
+A visualization of commit activity across the repository, regenerated on every push
+to `main` by the `contribution-badge` GitHub Actions workflow.
+
+![Contribution activity across the Regate repository](docs/contrib.svg)

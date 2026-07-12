@@ -1,12 +1,23 @@
 # Eggregate
 
-A prototype of the **MS3 e-graph reasoning backend** from the bachelor's thesis
-*Extending Artemis with proof-based mathematical exercises* (`main.pdf`,
-Sections 4.5 / 5.7 and Appendix B), built on [egglog](https://github.com/egraphs-good/egglog)
-equality saturation.
+A pluggable grading backend for equational-reasoning exercises in learning
+platforms. It implements the language-agnostic grading contract
+**[`GRADING_PROTOCOL.md`](../../GRADING_PROTOCOL.md)** (`GradeRequest` →
+`GradeResponse`, MathNode JSON, CLI + HTTP transports), so a host platform
+integrates against that contract once and runs this backend as a self-contained
+container, selected per exercise. (Artemis is the reference adopter; nothing here
+depends on it.)
 
-In the thesis MS3 is "designed/planned" but not yet implemented. This package
-implements it end to end — and grew into a small, self-contained toolkit for
+Eggregate is the **general grader** of the four backends — where the others certify
+narrower fragments more formally, it grades a full derivation (proofs, multi-step
+hints, and partial credit) fast, with per-step soundness by construction. It runs
+on a hand-written proof-producing e-graph plus
+[egglog](https://github.com/egraphs-good/egglog) equality saturation.
+
+It originated as the **MS3 e-graph reasoning backend** of the bachelor's thesis
+*Extending Artemis with proof-based mathematical exercises* (`main.pdf`,
+Sections 4.5 / 5.7 and Appendix B), where MS3 is designed but not yet implemented.
+This package implements it end to end and grew into a self-contained toolkit for
 equational-reasoning exercises: grading, proving, hinting, and soundness checking
 over a shared rule catalogue. The two core MS3 capabilities:
 
@@ -109,9 +120,10 @@ ruleset is *compiled* from it, and the directed stepper/validator *interpret* it
 directly through the one shared matcher. This is the thesis's "single shared rule
 source, two engines" principle (§4.3), here made literal.
 
-## Division of labour (corrected per the design doc)
+## Division of labour
 
-The earlier transcript overstated egglog's role. The corrected split:
+Egglog is a pass-sound equivalence oracle only — it is deliberately not the seat
+of per-step soundness. The split:
 
 - **Step-local soundness lives in `validate.py`, not the e-graph.** A step is
   valid *by construction* — we matched a rule's LHS and emitted its RHS. The
