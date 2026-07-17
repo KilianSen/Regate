@@ -31,7 +31,7 @@ from .robust import (
 )
 from .validate import Equation, Move, verify_chain
 
-PROTOCOL = "1.0"
+PROTOCOL = "1.1"
 BACKEND = "eggregate"
 VERSION = "0.1.0"
 

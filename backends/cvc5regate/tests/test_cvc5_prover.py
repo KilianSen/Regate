@@ -234,6 +234,190 @@ def test_verify_rules_rejects_an_unsound_rule():
     assert resp["meta"]["ruleset"]["drop_left"]["proven"] is False
 
 
+# --- generalized inductive hypothesis (C2): apply the IH at a shifted accumulator.
+# `fact_aux x n = x·fact n` inducts on n; the step unfolds fact_aux x (S n) to
+# fact_aux (x·(S n)) n, then applies the IH at the *shifted* accumulator x·(S n).
+# The IH is universal in x (cvc5 co-quantifies it), so this is sound; step_check
+# recovers the instance by matching the wildcarded IH LHS against the subterm.
+_FA = [rule("factaux_zero", app("fact_aux", wd("x"), num(0)), wd("x")),
+       rule("factaux_succ", app("fact_aux", wd("x"), succ(wd("k"))),
+            app("fact_aux", mul(wd("x"), succ(wd("k"))), wd("k"))),
+       rule("fact_zero", app("fact", num(0)), num(1)),
+       rule("fact_succ", app("fact", succ(wd("k"))), mul(succ(wd("k")), app("fact", wd("k"))))]
+_FA_GOAL = {"mode": "induction", "domain": "int",
+            "goal": eq(app("fact_aux", vr("x"), vr("n")), mul(vr("x"), app("fact", vr("n")))),
+            "inductionVar": "n", "definitions": _FA,
+            "ruleset": [rule("mul_one_right", mul(wd("a"), num(1)), wd("a"))],
+            "options": {"ac_normalization": True}}
+_SN = succ(vr("n"))
+_FA_BASE = [{"rule": "factaux_zero", "path": [0], "result": eq(vr("x"), mul(vr("x"), app("fact", num(0))))},
+            {"rule": "fact_zero", "path": [1, 1], "result": eq(vr("x"), mul(vr("x"), num(1)))},
+            {"rule": "mul_one_right", "path": [1], "result": eq(vr("x"), vr("x"))}]
+_FA_STEP = [
+    {"rule": "factaux_succ", "path": [0],
+     "result": eq(app("fact_aux", mul(vr("x"), _SN), vr("n")), mul(vr("x"), app("fact", _SN)))},
+    {"kind": "B", "path": [0],
+     "equation": [app("fact_aux", mul(vr("x"), _SN), vr("n")),
+                  mul(mul(vr("x"), _SN), app("fact", vr("n")))],
+     "result": eq(mul(mul(vr("x"), _SN), app("fact", vr("n"))), mul(vr("x"), app("fact", _SN)))},
+    {"rule": "fact_succ", "path": [1, 1],
+     "result": eq(mul(mul(vr("x"), _SN), app("fact", vr("n"))),
+                  mul(vr("x"), mul(_SN, app("fact", vr("n")))))},
+]
+
+
+def test_generalized_ih_certifies_shifted_accumulator():
+    _install(lambda s, a: ("unknown", "") if "--fmf-fun" in a else ("unsat", ""))
+    req = {"protocol": "1.1", "exercise": _FA_GOAL, "submission": _sub(_FA_BASE, _FA_STEP)}
+    resp = grade.grade(req)
+    assert resp["outcome"] == "proven_equal" and resp["certified"] and resp["score"] == 100
+
+
+def test_generalized_ih_rejects_wrong_instance():
+    # The student declares the IH at the *unshifted* accumulator x, but the subterm
+    # is fact_aux (x·(S n)) n. The declared equation is not that instance -> invalid.
+    _install(lambda s, a: ("unknown", "") if "--fmf-fun" in a else ("unsat", ""))
+    bad_step = [dict(_FA_STEP[0]),
+                {"kind": "B", "path": [0],
+                 "equation": [app("fact_aux", vr("x"), vr("n")), mul(vr("x"), app("fact", vr("n")))],
+                 "result": eq(mul(vr("x"), app("fact", vr("n"))), mul(vr("x"), app("fact", _SN)))}]
+    req = {"protocol": "1.1", "exercise": _FA_GOAL, "submission": _sub(_FA_BASE, bad_step)}
+    resp = grade.grade(req)
+    assert resp["outcome"] == "invalid_derivation" and not resp["certified"]
+
+
+def test_instantiate_preserves_apply_function_name():
+    # Regression: step_check.instantiate dropped `value` on slotted nodes, so an
+    # `apply` template lost its function name. First node type with value+slots.
+    import step_check as sc
+    out = sc.instantiate(app("f", wd("a"), num(0)), {"a": vr("z")})
+    assert out == app("f", vr("z"), num(0))
+
+
+# --- datatype (list) induction (M2): induction over nil/cons with an accumulator.
+def _nil(): return app("nil")
+def _cons(h, t): return app("cons", h, t)
+_LST = {"name": "Lst", "constructors": [
+    {"name": "nil", "fields": []},
+    {"name": "cons", "fields": [{"name": "h", "sort": "int"}, {"name": "t", "sort": "Lst"}]}]}
+_SUML = [rule("summa_nil", app("summa", _nil()), num(0)),
+         rule("summa_cons", app("summa", _cons(wd("h"), wd("t"))), add(wd("h"), app("summa", wd("t")))),
+         rule("sum_nil", app("sum", _nil(), wd("a")), wd("a")),
+         rule("sum_cons", app("sum", _cons(wd("h"), wd("t")), wd("a")),
+              app("sum", wd("t"), add(wd("a"), wd("h"))))]
+_LST_GOAL = {"mode": "induction", "domain": "int", "datatype": _LST,
+             "goal": eq(app("sum", vr("l"), vr("a")), add(vr("a"), app("summa", vr("l")))),
+             "inductionVar": "l", "definitions": _SUML,
+             "ruleset": [rule("add_zero_right", add(wd("x"), num(0)), wd("x"))],
+             "options": {"ac_normalization": True}}
+
+
+def test_list_datatype_translates_to_declare_datatype():
+    src = cvc5_induction.build_prove_source(_LST_GOAL)
+    assert "(declare-datatype Lst ((nil) (cons (h Int) (t Lst))))" in src
+    assert "define-fun-rec sum" in src and "define-fun-rec summa" in src
+    assert "(assert (not (forall ((l Lst)" in src        # induction var (Lst) quantified first
+
+
+def test_list_grade_certified():
+    _install(lambda s, a: ("unknown", "") if "--fmf-fun" in a else ("unsat", ""))
+    _cht = _cons(vr("h"), vr("t"))
+    base = [{"rule": "sum_nil", "path": [0], "result": eq(vr("a"), add(vr("a"), app("summa", _nil())))},
+            {"rule": "summa_nil", "path": [1, 1], "result": eq(vr("a"), add(vr("a"), num(0)))},
+            {"rule": "add_zero_right", "path": [1], "result": eq(vr("a"), vr("a"))}]
+    step = [
+        {"rule": "sum_cons", "path": [0],
+         "result": eq(app("sum", vr("t"), add(vr("a"), vr("h"))), add(vr("a"), app("summa", _cht)))},
+        {"kind": "B", "path": [0],
+         "equation": [app("sum", vr("t"), add(vr("a"), vr("h"))),
+                      add(add(vr("a"), vr("h")), app("summa", vr("t")))],
+         "result": eq(add(add(vr("a"), vr("h")), app("summa", vr("t"))), add(vr("a"), app("summa", _cht)))},
+        {"rule": "summa_cons", "path": [1, 1],
+         "result": eq(add(add(vr("a"), vr("h")), app("summa", vr("t"))),
+                      add(vr("a"), add(vr("h"), app("summa", vr("t")))))},
+    ]
+    resp = grade.grade({"protocol": "1.1", "exercise": _LST_GOAL, "submission": _sub(base, step)})
+    assert resp["outcome"] == "proven_equal" and resp["certified"] and resp["score"] == 100
+
+
+def test_datatype_witness_fails_safe_to_unknown():
+    # D4: a false datatype goal's counterexample is a constructor term; the numeric
+    # parser mangles `(cons (- 1) nil)` into `{'-': '1'}`. That is not a real witness
+    # (its key is not a variable), so certify must degrade to unknown, never emit a
+    # `proven_unequal` carrying the garbage.
+    def respond(s, a):
+        if "--fmf-fun" in a:
+            return "sat", "sat\n((l (cons (- 1) nil)))"
+        return "unsat", ""
+    _install(respond)
+    res = cvc5_induction.certify(_LST_GOAL)
+    assert res.outcome == "unknown" and res.witness is None
+
+
+# --- tree induction (M3): two recursive positions → two IHs (P(l) and P(r)).
+def _empty(): return app("empty")
+def _node(l, v, r): return app("node", l, v, r)
+_TREE = {"name": "Tree", "constructors": [
+    {"name": "empty", "fields": []},
+    {"name": "node", "fields": [{"name": "l", "sort": "Tree"},
+                                {"name": "v", "sort": "int"}, {"name": "r", "sort": "Tree"}]}]}
+_NODES = [rule("nodes_empty", app("nodes", _empty()), num(0)),
+          rule("nodes_node", app("nodes", _node(wd("l"), wd("v"), wd("r"))),
+               add(num(1), add(app("nodes", wd("l")), app("nodes", wd("r"))))),
+          rule("aux_empty", app("aux", _empty(), wd("a")), wd("a")),
+          rule("aux_node", app("aux", _node(wd("l"), wd("v"), wd("r")), wd("a")),
+               app("aux", wd("r"), app("aux", wd("l"), add(wd("a"), num(1)))))]
+_TREE_GOAL = {"mode": "induction", "domain": "int", "datatype": _TREE,
+              "goal": eq(app("aux", vr("t"), vr("a")), add(vr("a"), app("nodes", vr("t")))),
+              "inductionVar": "t", "definitions": _NODES,
+              "ruleset": [rule("add_zero_right", add(wd("x"), num(0)), wd("x"))],
+              "options": {"ac_normalization": True}}
+
+
+def test_tree_two_ih_certified():
+    _install(lambda s, a: ("unknown", "") if "--fmf-fun" in a else ("unsat", ""))
+    nlvr, a1 = _node(vr("l"), vr("v"), vr("r")), add(vr("a"), num(1))
+    base = [{"rule": "aux_empty", "path": [0], "result": eq(vr("a"), add(vr("a"), app("nodes", _empty())))},
+            {"rule": "nodes_empty", "path": [1, 1], "result": eq(vr("a"), add(vr("a"), num(0)))},
+            {"rule": "add_zero_right", "path": [1], "result": eq(vr("a"), vr("a"))}]
+    step = [
+        {"rule": "aux_node", "path": [0],
+         "result": eq(app("aux", vr("r"), app("aux", vr("l"), a1)), add(vr("a"), app("nodes", nlvr)))},
+        {"kind": "B", "path": [0, 1],                    # IH P(l) at aux(l, a+1)
+         "equation": [app("aux", vr("l"), a1), add(a1, app("nodes", vr("l")))],
+         "result": eq(app("aux", vr("r"), add(a1, app("nodes", vr("l")))), add(vr("a"), app("nodes", nlvr)))},
+        {"kind": "B", "path": [0],                       # IH P(r) at aux(r, (a+1)+nodes l)
+         "equation": [app("aux", vr("r"), add(a1, app("nodes", vr("l")))),
+                      add(add(a1, app("nodes", vr("l"))), app("nodes", vr("r")))],
+         "result": eq(add(add(a1, app("nodes", vr("l"))), app("nodes", vr("r"))), add(vr("a"), app("nodes", nlvr)))},
+        {"rule": "nodes_node", "path": [1, 1],
+         "result": eq(add(add(a1, app("nodes", vr("l"))), app("nodes", vr("r"))),
+                      add(vr("a"), add(num(1), add(app("nodes", vr("l")), app("nodes", vr("r"))))))},
+    ]
+    resp = grade.grade({"protocol": "1.1", "exercise": _TREE_GOAL, "submission": _sub(base, step)})
+    assert resp["outcome"] == "proven_equal" and resp["certified"] and resp["score"] == 100
+
+
+def test_datatype_unknown_field_sort_is_rejected():
+    # A typo'd field sort (`real` for `rat`) must be rejected, not silently coerced to
+    # Int — `∀(h:Int)` is weaker than `∀(h:Real)`, so coercion could certify a goal
+    # that is false over the rationals (the one non-fail-safe mistranslation).
+    fake = _install(lambda s, a: ("unsat", ""))
+    bad = {**_LST_GOAL, "datatype": {"name": "Lst", "constructors": [
+        {"name": "nil", "fields": []},
+        {"name": "cons", "fields": [{"name": "h", "sort": "real"}, {"name": "t", "sort": "Lst"}]}]}}
+    res = cvc5_induction.certify(bad)
+    assert res.outcome == "unknown" and res.method == "untranslatable"
+    assert not fake.calls                              # rejected before any solver call
+
+
+def test_witness_label_mapping_is_exact():
+    # An accumulator named `a` must not steal the `(val n)` value by substring match.
+    _install(lambda s, a: ("sat", "sat\n(((val n) 2) (a 5))"))
+    res = cvc5_prover.disprove("(check-sat)", ["a", "n"])
+    assert res.witness == {"a": "5", "n": "2"}
+
+
 def test_false_goal_returns_proven_unequal_with_witness():
     # `certify` could always build a proven_unequal verdict, but grade_derivation only
     # consulted it after both obligations had certified, so no witness ever escaped.

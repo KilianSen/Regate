@@ -33,12 +33,43 @@ POW = [rule("pow_zero", powr(wd("a"), num(0)), num(1)),
 SUM = [rule("sum_zero", app("sum", num(0)), num(0)),
        rule("sum_succ", app("sum", succ(wd("k"))), add(succ(wd("k")), app("sum", wd("k"))))]
 
+# Lists (since 1.1): the accumulator list-sum  sum l a = a + summa l, over nil/cons.
+def nil(): return app("nil")
+def cons(h, t): return app("cons", h, t)
+LST = {"name": "Lst", "constructors": [
+    {"name": "nil", "fields": []},
+    {"name": "cons", "fields": [{"name": "h", "sort": "int"}, {"name": "t", "sort": "Lst"}]}]}
+SUML = [rule("summa_nil", app("summa", nil()), num(0)),
+        rule("summa_cons", app("summa", cons(wd("h"), wd("t"))), add(wd("h"), app("summa", wd("t")))),
+        rule("sum_nil", app("sum", nil(), wd("a")), wd("a")),
+        rule("sum_cons", app("sum", cons(wd("h"), wd("t")), wd("a")),
+             app("sum", wd("t"), add(wd("a"), wd("h"))))]
+
+# Binary trees + TWO IHs (since 1.1): aux t a = a + nodes t, over empty/node.
+def emptyt(): return app("empty")
+def treenode(l, v, r): return app("node", l, v, r)
+TREE = {"name": "Tree", "constructors": [
+    {"name": "empty", "fields": []},
+    {"name": "node", "fields": [{"name": "l", "sort": "Tree"},
+                                {"name": "v", "sort": "int"}, {"name": "r", "sort": "Tree"}]}]}
+NODES = [rule("nodes_empty", app("nodes", emptyt()), num(0)),
+         rule("nodes_node", app("nodes", treenode(wd("l"), wd("v"), wd("r"))),
+              add(num(1), add(app("nodes", wd("l")), app("nodes", wd("r"))))),
+         rule("aux_empty", app("aux", emptyt(), wd("a")), wd("a")),
+         rule("aux_node", app("aux", treenode(wd("l"), wd("v"), wd("r")), wd("a")),
+              app("aux", wd("r"), app("aux", wd("l"), add(wd("a"), num(1)))))]
+
 
 def ind(goal, defs=POW, domain=None):
     ex = {"mode": "induction", "goal": goal, "inductionVar": "n", "definitions": defs}
     if domain:
         ex["domain"] = domain
     return ex
+
+
+def dt_ind(goal, defs, datatype, var, domain="int"):
+    return {"mode": "induction", "goal": goal, "inductionVar": var, "datatype": datatype,
+            "definitions": defs, "domain": domain}
 
 
 # (name, request, expected outcome). All verified on cvc5 1.3.4.
@@ -54,6 +85,14 @@ MUST_PASS = [
     ("2*sum(i) = n*(n+1)  (recursive sum)",
      ind(eq(mul(num(2), app("sum", vr("n"))), mul(vr("n"), add(vr("n"), num(1)))),
          defs=SUM, domain="int"), "proven_equal"),
+    # Datatype induction over LISTS (M2): the accumulator-generalized list sum.
+    ("sum l a = a + summa l  (list accumulator)",
+     dt_ind(eq(app("sum", vr("l"), vr("a")), add(vr("a"), app("summa", vr("l")))),
+            SUML, LST, "l"), "proven_equal"),
+    # Datatype induction over TREES (M3): two recursive positions → two IHs.
+    ("aux t a = a + nodes t  (tree, two IHs)",
+     dt_ind(eq(app("aux", vr("t"), vr("a")), add(vr("a"), app("nodes", vr("t")))),
+            NODES, TREE, "t"), "proven_equal"),
     # Disproof with a numeric witness (2^n = n+1 fails at n=2):
     ("2^n = n+1  (false -> witness)",
      ind(eq(powr(num(2), vr("n")), add(vr("n"), num(1))), domain="int"), "proven_unequal"),

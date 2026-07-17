@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 from dataclasses import dataclass
 
 import cvc5_prover
@@ -17,55 +18,206 @@ class InductionError(ValueError):
 # Relational goal node types and their SMT operators.
 _REL = {"eq": "=", "le": "<=", "lt": "<", "ge": ">=", "gt": ">"}
 _BIN = {"add": "+", "sub": "-", "mul": "*"}
+_NUM_SORTS = {"int": "Int", "rat": "Real"}
 
 
 # ---------------------------------------------------------------------------
-# Typing: which variables are ℕ (the induction var / exponents) vs numeric.
-# Mirrors lean_induction._infer.
+# Datatype descriptor (since 1.1): the type of the induction variable. Defaults
+# to ℕ (zero/succ) when `exercise.datatype` is absent, so ℕ induction is byte-for-
+# byte unchanged. A constructor field whose sort is the datatype's own name is a
+# *recursive* position (each yields an IH). Exactly one non-recursive ("base") and
+# one recursive ("step") constructor are supported — ℕ, lists, binary trees —
+# deliberately bounded short of a general datatype / proof-assistant engine.
+#
+# ℕ keeps its legacy node forms (`number 0` = zero, `succ` node = succ, and the
+# `val : Nat→Int` coercion for ℕ values in numeric positions). Other datatypes use
+# `apply`-form constructors (`nil`, `cons h t`) and never coerce — their induction
+# variable only ever appears as a recursive-function argument.
 # ---------------------------------------------------------------------------
-def _infer(node: dict, dom: str, env: dict[str, str], indvar: str = "") -> None:
+@dataclass
+class _Field:
+    name: str
+    sort: str            # a datatype name (recursive) or "int"/"rat"
+
+
+@dataclass
+class _Ctor:
+    name: str
+    fields: list         # list[_Field]
+
+
+@dataclass
+class _Datatype:
+    name: str
+    ctors: list          # list[_Ctor]
+
+    def recursive_fields(self, ctor) -> list:
+        return [f for f in ctor.fields if f.sort == self.name]
+
+    def base_ctor(self) -> "_Ctor":
+        cs = [c for c in self.ctors if not self.recursive_fields(c)]
+        if len(cs) != 1:
+            raise InductionError(f"datatype {self.name!r} needs exactly one non-recursive constructor")
+        if cs[0].fields:
+            raise InductionError(f"base constructor {cs[0].name!r} must be nullary")
+        return cs[0]
+
+    def step_ctor(self) -> "_Ctor":
+        cs = [c for c in self.ctors if self.recursive_fields(c)]
+        if len(cs) != 1:
+            raise InductionError(f"datatype {self.name!r} needs exactly one recursive constructor")
+        return cs[0]
+
+    def declare(self) -> str:
+        parts = []
+        for c in self.ctors:
+            if not c.fields:
+                parts.append(f"({c.name})")
+                continue
+            fs = " ".join(
+                f"({f.name} {self.name if f.sort == self.name else _NUM_SORTS.get(f.sort, 'Int')})"
+                for f in c.fields)
+            parts.append(f"({c.name} {fs})")
+        return f"(declare-datatype {self.name} ({' '.join(parts)}))"
+
+
+_NAT = _Datatype("Nat", [_Ctor("zero", []), _Ctor("succ", [_Field("pred", "Nat")])])
+
+
+def _parse_datatype(ex: dict) -> _Datatype:
+    d = ex.get("datatype")
+    if not d:
+        return _NAT
+    name = str(d.get("name") or "")
+    if not name:
+        raise InductionError("exercise.datatype needs a name")
+    ctors = [_Ctor(str(c.get("name")),
+                   [_Field(str(f.get("name")), str(f.get("sort")))
+                    for f in (c.get("fields") or [])])
+             for c in (d.get("constructors") or [])]
+    if not ctors:
+        raise InductionError("exercise.datatype needs constructors")
+    # Every field sort must be the datatype itself (recursive) or a known numeric
+    # domain. Do NOT silently coerce an unknown sort to Int: `∀(h:Int)` is a *weaker*
+    # claim than `∀(h:Real)`, so a typo like "real" would let cvc5 certify a goal that
+    # is false over the intended rationals — the one non-fail-safe mistranslation.
+    allowed = {name, "int", "rat"}
+    for c in ctors:
+        for f in c.fields:
+            if f.sort not in allowed:
+                raise InductionError(
+                    f"field {f.name!r} of constructor {c.name!r} has unknown sort {f.sort!r} "
+                    f"(expected {name!r}, 'int', or 'rat')")
+    dt = _Datatype(name, ctors)
+    dt.base_ctor(); dt.step_ctor()      # validate the bounded shape up front
+    return dt
+
+
+def _ctor_of(node: dict, dt: _Datatype):
+    """The datatype constructor `node` is an instance of, or None. ℕ uses `number 0`
+    / `succ`; other datatypes use `apply`-form constructors."""
+    t = node.get("type")
+    if dt.name == "Nat":
+        if t == "number" and str(node.get("value")) == "0":
+            return next((c for c in dt.ctors if c.name == "zero"), None)
+        if t == "succ":
+            return next((c for c in dt.ctors if c.name == "succ"), None)
+        return None
+    if t == "apply":
+        return next((c for c in dt.ctors if c.name == str(node.get("value"))), None)
+    return None
+
+
+def _rec_index(args: list, dt: _Datatype):
+    """Index of the argument in constructor position (the recursion argument), or None."""
+    for i, a in enumerate(args):
+        if _ctor_of(a, dt) is not None:
+            return i
+    return None
+
+
+def _signatures(definitions: list, dt: _Datatype) -> dict:
+    """function name → ["dt"|"num"] per argument, from the constructor-matched arg
+    across its base/step rules. Drives argument routing in `_infer` and `_term`."""
+    sigs: dict[str, list] = {}
+    for d in definitions:
+        lhs = d.get("lhs", {})
+        if lhs.get("type") != "apply":
+            continue
+        name = str(lhs["value"])
+        args = lhs["slots"]["args"]
+        sig = sigs.setdefault(name, ["num"] * len(args))
+        for i, a in enumerate(args):
+            if _ctor_of(a, dt) is not None:
+                sig[i] = "dt"
+    return sigs
+
+
+# ---------------------------------------------------------------------------
+# Typing: which variables are the induction datatype vs numeric (ℚ/ℤ).
+# The datatype tag is "N" for ℕ (legacy, gets the `val` coercion) or the datatype
+# name otherwise. Mirrors lean_induction._infer.
+# ---------------------------------------------------------------------------
+def _infer(node: dict, dom: str, env: dict[str, str], indvar: str = "",
+           sigs: dict | None = None, dt: _Datatype = _NAT) -> None:
+    sigs = sigs if sigs is not None else {}
+    dt_tag = "N" if dt.name == "Nat" else dt.name
     t = node.get("type")
     if t in ("variable", "wild"):
         name = str(node["value"])
-        # The induction variable is ALWAYS the ℕ datatype (cvc5 inducts on it
-        # structurally); wherever it appears in a numeric position it is coerced
-        # via `val`. So it is exempt from the numeric/ℕ consistency check.
+        # The induction variable is ALWAYS the datatype (cvc5 inducts on it
+        # structurally); for ℕ it is coerced via `val` wherever it appears numeric,
+        # so it is exempt from the numeric/datatype consistency check.
         if name == indvar:
-            env[name] = "N"
+            env[name] = dt_tag
             return
         if env.get(name, dom) != dom:
-            raise InductionError(f"variable {name!r} is used as both numeric and ℕ")
+            raise InductionError(f"variable {name!r} is used at two incompatible sorts")
         env[name] = dom
         return
     if t == "number":
         return
     s = node.get("slots") or {}
     if t == "succ":
-        _infer(s["inner"][0], "N", env, indvar)
+        _infer(s["inner"][0], "N", env, indvar, sigs, dt)
     elif t == "pow":
-        _infer(s["base"][0], "Q", env, indvar)
-        _infer(s["exponent"][0], "N", env, indvar)
+        _infer(s["base"][0], "Q", env, indvar, sigs, dt)
+        _infer(s["exponent"][0], "N", env, indvar, sigs, dt)
     elif t == "frac":
-        _infer(s["numerator"][0], "Q", env, indvar)
-        _infer(s["denominator"][0], "Q", env, indvar)
+        _infer(s["numerator"][0], "Q", env, indvar, sigs, dt)
+        _infer(s["denominator"][0], "Q", env, indvar, sigs, dt)
     elif t in _BIN:
         # `add` may be ℕ (an exponent sum) or numeric; inherit the context domain.
-        _infer(s["left"][0], dom, env, indvar)
-        _infer(s["right"][0], dom, env, indvar)
+        _infer(s["left"][0], dom, env, indvar, sigs, dt)
+        _infer(s["right"][0], dom, env, indvar, sigs, dt)
     elif t == "neg":
-        _infer(s["inner"][0], dom, env, indvar)
+        _infer(s["inner"][0], dom, env, indvar, sigs, dt)
     elif t == "apply":
-        # A transmitted recursive function f(args…, k): the LAST argument is the
-        # ℕ recursion variable, the rest are numeric.
+        name = str(node["value"])
         args = s["args"]
-        for a in args[:-1]:
-            _infer(a, "Q", env, indvar)
-        _infer(args[-1], "N", env, indvar)
+        if _ctor_of(node, dt) is not None:
+            # A datatype constructor application (e.g. `cons h t`): recursive fields
+            # are the datatype, the rest numeric.
+            ctor = _ctor_of(node, dt)
+            for f, a in zip(ctor.fields, args):
+                _infer(a, dt.name if f.sort == dt.name else "Q", env, indvar, sigs, dt)
+            return
+        sig = sigs.get(name)
+        if sig is None:
+            # Legacy ℕ default: last argument is the recursion variable, rest numeric.
+            if dt.name != "Nat":
+                raise InductionError(f"unknown function {name!r} (no definition)")
+            for a in args[:-1]:
+                _infer(a, "Q", env, indvar, sigs, dt)
+            _infer(args[-1], "N", env, indvar, sigs, dt)
+            return
+        for a, srt in zip(args, sig):
+            _infer(a, dt_tag if srt == "dt" else "Q", env, indvar, sigs, dt)
     elif t in _REL:
-        _infer(s["left"][0], "Q", env, indvar)
-        _infer(s["right"][0], "Q", env, indvar)
+        _infer(s["left"][0], "Q", env, indvar, sigs, dt)
+        _infer(s["right"][0], "Q", env, indvar, sigs, dt)
     elif t == "divides":
-        _infer(s["value"][0], "Q", env, indvar)
+        _infer(s["value"][0], "Q", env, indvar, sigs, dt)
     else:
         raise InductionError(f"cannot type node type {t!r}")
 
@@ -74,10 +226,14 @@ def _infer(node: dict, dom: str, env: dict[str, str], indvar: str = "") -> None:
 # MathNode -> SMT term.  Numeric sort S is "Real" (ℚ) or "Int".
 # ---------------------------------------------------------------------------
 class _Ctx:
-    """Mutable translation state: which built-ins/funcs the emitted file needs."""
-    def __init__(self, sort: str, env: dict[str, str]):
+    """Mutable translation state: the datatype, function signatures, and which
+    built-ins the emitted file needs."""
+    def __init__(self, sort: str, env: dict[str, str],
+                 dt: _Datatype = _NAT, sigs: dict | None = None):
         self.sort = sort
         self.env = env
+        self.dt = dt
+        self.sigs = sigs if sigs is not None else {}
         self.need_val = False     # val : Nat -> Int
         self.need_nplus = False   # nplus : Nat -> Nat -> Nat
 
@@ -104,23 +260,34 @@ def _coerce(nat_term: str, sort: str, ctx: _Ctx) -> str:
     return f"(val {nat_term})" if sort == "Int" else f"(to_real (val {nat_term}))"
 
 
-def _nat_term(node: dict, ctx: _Ctx) -> str:
-    """A ℕ-sorted (Nat datatype) term — exponent / succ-argument position."""
+def _dt_term(node: dict, ctx: _Ctx) -> str:
+    """A datatype-sorted term for `ctx.dt`: the induction variable, or a constructor
+    application. For ℕ this is the exponent / succ-argument position (`_nat_term`);
+    for other datatypes it emits `apply`-form constructors (`nil`, `(cons h t)`)."""
+    dt = ctx.dt
     t = node.get("type")
     if t in ("variable", "wild"):
         return str(node["value"])
-    if t == "number":
-        k = int(str(node["value"]))
-        if k < 0:
-            raise InductionError("negative ℕ literal")
-        return _nat_lit(k)
-    s = node.get("slots") or {}
-    if t == "succ":
-        return f"(succ {_nat_term(s['inner'][0], ctx)})"
-    if t == "add":
-        ctx.need_nplus = True
-        return f"(nplus {_nat_term(s['left'][0], ctx)} {_nat_term(s['right'][0], ctx)})"
-    raise InductionError(f"cannot translate node type {t!r} to ℕ")
+    if dt.name == "Nat":
+        if t == "number":
+            k = int(str(node["value"]))
+            if k < 0:
+                raise InductionError("negative ℕ literal")
+            return _nat_lit(k)
+        s = node.get("slots") or {}
+        if t == "succ":
+            return f"(succ {_dt_term(s['inner'][0], ctx)})"
+        if t == "add":
+            ctx.need_nplus = True
+            return f"(nplus {_dt_term(s['left'][0], ctx)} {_dt_term(s['right'][0], ctx)})"
+        raise InductionError(f"cannot translate node type {t!r} to ℕ")
+    ctor = _ctor_of(node, dt)
+    if ctor is None:
+        raise InductionError(f"{node.get('value')!r} is not a constructor of {dt.name}")
+    args = (node.get("slots") or {}).get("args", [])
+    parts = [_dt_term(a, ctx) if f.sort == dt.name else _term(a, ctx)
+             for f, a in zip(ctor.fields, args)]
+    return f"({ctor.name} {' '.join(parts)})" if parts else ctor.name
 
 
 def _term(node: dict, ctx: _Ctx) -> str:
@@ -128,8 +295,11 @@ def _term(node: dict, ctx: _Ctx) -> str:
     t = node.get("type")
     if t in ("variable", "wild"):
         name = str(node["value"])
-        if ctx.env.get(name) == "N":
+        tag = ctx.env.get(name)
+        if tag == "N":
             return _coerce(name, ctx.sort, ctx)
+        if tag is not None and tag not in ("Q",):
+            raise InductionError(f"{name!r} is a {tag} value, not numeric")
         return name
     if t == "number":
         return _num_lit(node["value"], ctx.sort)
@@ -144,17 +314,25 @@ def _term(node: dict, ctx: _Ctx) -> str:
         return f"(/ {_term(s['numerator'][0], ctx)} {_term(s['denominator'][0], ctx)})"
     if t == "pow":
         base = _term(s["base"][0], ctx)
-        exp = _nat_term(s["exponent"][0], ctx)
+        exp = _dt_term(s["exponent"][0], ctx)
         return f"(pow {base} {exp})"
     if t == "apply":
         fname = str(node["value"])
         args = s["args"]
-        parts = [_term(a, ctx) for a in args[:-1]] + [_nat_term(args[-1], ctx)]
+        sig = ctx.sigs.get(fname)
+        if sig is None:
+            # Legacy ℕ default: last argument is the recursion variable, rest numeric.
+            if ctx.dt.name != "Nat":
+                raise InductionError(f"unknown function {fname!r} (no definition)")
+            parts = [_term(a, ctx) for a in args[:-1]] + [_dt_term(args[-1], ctx)]
+        else:
+            parts = [_dt_term(a, ctx) if srt == "dt" else _term(a, ctx)
+                     for a, srt in zip(args, sig)]
         return f"({fname} {' '.join(parts)})"
     if t == "succ":
         # A ℕ value appearing where a number is wanted, e.g. the `(k+1)` summand
         # in a sum's recursive step — coerce it.
-        return _coerce(_nat_term(node, ctx), ctx.sort, ctx)
+        return _coerce(_dt_term(node, ctx), ctx.sort, ctx)
     raise InductionError(f"cannot translate node type {t!r} to a numeric term")
 
 
@@ -209,33 +387,65 @@ def _build_pow(definitions: list[dict], ctx: _Ctx) -> str:
     )
 
 
+def _ctor_field_names(node: dict, dt: _Datatype) -> list[str]:
+    """Pattern-variable names bound by a constructor pattern in a definition rule:
+    `succ(k)` → ["k"]; `cons(h, t)` → ["h", "t"]."""
+    t = node.get("type")
+    if t == "succ":
+        return [_wild(node["slots"]["inner"][0])]
+    if t == "apply":
+        return [_wild(a) for a in (node.get("slots") or {}).get("args", [])]
+    return []
+
+
+def _fresh(base: str, used: set) -> str:
+    name, i = base, 0
+    while name in used:
+        i += 1
+        name = f"{base}{i}"
+    return name
+
+
 def _build_apply_defs(definitions: list[dict], ctx: _Ctx) -> str:
-    """`define-fun-rec` for each generic recursive function supplied as `apply`
-    definitions: f(args…,0)→base and f(args…,S k)→step."""
+    """`define-fun-rec` for each recursive function supplied as `apply` definitions —
+    a base-constructor rule and a step-constructor rule, recursing on the
+    constructor-matched argument (any position, per the datatype descriptor)."""
+    dt = ctx.dt
+    base_c, step_c = dt.base_ctor(), dt.step_ctor()
     by_name: dict[str, dict] = {}
     for d in definitions:
         lhs = d.get("lhs", {})
         if lhs.get("type") != "apply":
             continue
-        by_name.setdefault(str(lhs["value"]), {})
-        last = lhs["slots"]["args"][-1]
-        if last.get("type") == "number" and str(last.get("value")) == "0":
-            by_name[str(lhs["value"])]["base"] = d
-        elif last.get("type") == "succ":
-            by_name[str(lhs["value"])]["succ"] = d
+        name = str(lhs["value"])
+        args = lhs["slots"]["args"]
+        ridx = _rec_index(args, dt)
+        if ridx is None:
+            raise InductionError(f"definition of {name!r} does not match a {dt.name} constructor")
+        ctor = _ctor_of(args[ridx], dt)
+        by_name.setdefault(name, {})[ctor.name] = (d, ridx)
     out = []
-    for fname, rules in by_name.items():
-        if "base" not in rules or "succ" not in rules:
-            raise InductionError(f"recursive function {fname!r} needs a 0-rule and a succ-rule")
-        b_args = rules["base"]["lhs"]["slots"]["args"]
-        s_args = rules["succ"]["lhs"]["slots"]["args"]
-        params = [f"({_wild(a)} {ctx.sort})" for a in s_args[:-1]]
-        k = _wild(s_args[-1]["slots"]["inner"][0])
-        base_body = _term(rules["base"]["rhs"], ctx)
-        succ_body = _term(rules["succ"]["rhs"], ctx)
+    for name, rules in by_name.items():
+        if base_c.name not in rules or step_c.name not in rules:
+            raise InductionError(
+                f"recursive function {name!r} needs a {base_c.name}-rule and a {step_c.name}-rule")
+        base_d, bridx = rules[base_c.name]
+        step_d, sridx = rules[step_c.name]
+        if bridx != sridx:
+            raise InductionError(f"{name!r} recurses on inconsistent argument positions")
+        ridx = sridx
+        s_args = step_d["lhs"]["slots"]["args"]
+        fields = _ctor_field_names(s_args[ridx], dt)
+        used = {_wild(a) for i, a in enumerate(s_args) if i != ridx} | set(fields)
+        subj = _fresh(dt.name.lower(), used)         # the match subject (recursion param)
+        params = [f"({subj} {dt.name})" if i == ridx else f"({_wild(a)} {ctx.sort})"
+                  for i, a in enumerate(s_args)]
+        base_body = _term(base_d["rhs"], ctx)
+        step_body = _term(step_d["rhs"], ctx)
+        step_pat = step_c.name if not fields else f"({step_c.name} {' '.join(fields)})"
         out.append(
-            f"(define-fun-rec {fname} ({' '.join(params)} ({k} Nat)) {ctx.sort}\n"
-            f"  (match {k} ((zero {base_body}) ((succ {k}) {succ_body}))))\n"
+            f"(define-fun-rec {name} ({' '.join(params)}) {ctx.sort}\n"
+            f"  (match {subj} (({base_c.name} {base_body}) ({step_pat} {step_body}))))\n"
         )
     return "".join(out)
 
@@ -253,8 +463,7 @@ def _numsort(ex: dict, goal: dict) -> str:
 
 
 def _preamble(ctx: _Ctx, defs_block: str) -> str:
-    lines = ["(set-logic ALL)",
-             "(declare-datatype Nat ((zero) (succ (pred Nat))))"]
+    lines = ["(set-logic ALL)", ctx.dt.declare()]
     if ctx.need_val:
         lines.append("(define-fun-rec val ((n Nat)) Int "
                      "(match n ((zero 0) ((succ k) (+ 1 (val k))))))")
@@ -279,18 +488,22 @@ def _translate(ex: dict, force_val: bool = False) -> tuple[str, str, str, list[s
         raise InductionError("missing inductionVar")
     var = str(var)
 
-    env: dict[str, str] = {var: "N"}
-    _infer(goal, "Q", env, indvar=var)
-    if env.get(var) != "N":
-        raise InductionError(f"induction variable {var!r} could not be typed as ℕ")
+    dt = _parse_datatype(ex)
+    dt_tag = "N" if dt.name == "Nat" else dt.name
+    definitions = ex.get("definitions") or []
+    sigs = _signatures(definitions, dt)
+
+    env: dict[str, str] = {var: dt_tag}
+    _infer(goal, "Q", env, var, sigs, dt)
+    if env.get(var) != dt_tag:
+        raise InductionError(f"induction variable {var!r} could not be typed as {dt.name}")
 
     sort = _numsort(ex, goal)
-    ctx = _Ctx(sort, env)
-    ctx.need_val = force_val
+    ctx = _Ctx(sort, env, dt, sigs)
+    ctx.need_val = force_val and dt.name == "Nat"    # `val` is a ℕ-only coercion
     # Translate the goal first so `ctx` learns which built-ins/defs are needed,
     # but recursive defs must be emitted before the goal references them.
     defs = ""
-    definitions = ex.get("definitions") or []
     if any(d.get("lhs", {}).get("type") == "pow" for d in definitions):
         defs += _build_pow(definitions, ctx)
     defs += _build_apply_defs(definitions, ctx)
@@ -306,7 +519,13 @@ def build_prove_source(ex: dict) -> str:
     so `unsat` means the theorem holds."""
     preamble, goal_bool, var, num_vars = _translate(ex)
     sort = _numsort(ex, ex["goal"])
-    binders = [f"({v} {sort})" for v in num_vars] + [f"({var} Nat)"]
+    dtname = _parse_datatype(ex).name
+    # The induction variable MUST be quantified first: cvc5's --quant-ind inducts on
+    # the leading datatype binder. With an accumulator (`x`) ahead of it, cvc5 tries
+    # to induct on the numeric `x` and never generalizes the recursion — every
+    # accumulator goal then times out. Datatype-first, it inducts on the induction
+    # variable with the accumulators kept universal (measured: 30s timeout → 0.01s).
+    binders = [f"({var} {dtname})"] + [f"({v} {sort})" for v in num_vars]
     return (preamble +
             f"(assert (not (forall ({' '.join(binders)}) {goal_bool})))\n"
             "(check-sat)\n")
@@ -321,10 +540,17 @@ def build_disprove_source(ex: dict) -> tuple[str, list[str]]:
     # it cvc5 parse-errors on the `get-value` and the counterexample is lost.
     preamble, goal_bool, var, num_vars = _translate(ex, force_val=True)
     sort = _numsort(ex, ex["goal"])
+    dt = _parse_datatype(ex)
     decls = [f"(declare-const {v} {sort})" for v in num_vars]
-    decls.append(f"(declare-const {var} Nat)")
+    decls.append(f"(declare-const {var} {dt.name})")
     labels = list(num_vars) + [var]
-    getvals = " ".join(f"(val {var})" if lbl == var else lbl for lbl in labels)
+    # ℕ reads the witness numerically via `val`; a non-ℕ datatype has no numeric
+    # coercion, so the model value is a constructor term (e.g. `(cons 5 nil)`) the
+    # numeric parser cannot read → D4: the witness degrades to empty → `unknown`,
+    # never a `proven_unequal` without a witness.
+    getvals = " ".join(
+        (f"(val {var})" if dt.name == "Nat" else var) if lbl == var else lbl
+        for lbl in labels)
     return (preamble + "\n".join(decls) + "\n" +
             f"(assert (not {goal_bool}))\n"
             "(check-sat)\n"
@@ -401,8 +627,10 @@ def build_rule_source(rule: dict, ex: dict) -> str:
     body = f"(= {_term(lhs_node, ctx)} {_term(rhs_node, ctx)})"
     preamble = _preamble(ctx, defs)
 
-    binders = [f"({v} {sort})" for v, d in sorted(env.items()) if d == "Q"]
-    binders += [f"({v} Nat)" for v, d in sorted(env.items()) if d == "N"]
+    # ℕ binders first (see build_prove_source): a rule quantifying over a ℕ variable
+    # is proven the same way, and cvc5's induction heuristics lead with the datatype.
+    binders = [f"({v} Nat)" for v, d in sorted(env.items()) if d == "N"]
+    binders += [f"({v} {sort})" for v, d in sorted(env.items()) if d == "Q"]
     if not binders:                       # a ground rule: no quantifier needed
         return preamble + f"(assert (not {body}))\n(check-sat)\n"
     return (preamble +
@@ -498,10 +726,20 @@ def certify(ex: dict) -> CertifyResult:
 
     # 1) Disprove first (ground-truth counterexample search) — robust.py philosophy.
     dis = cvc5_prover.disprove(disprove_src, labels)
-    if dis.verdict == "sat" and dis.witness:
-        return _store(key, CertifyResult("proven_unequal", False, "fmf-fun",
-                                         witness=dis.witness,
-                                         detail="cvc5 found a counterexample"))
+    if dis.verdict == "sat":
+        # D4 — witnesses fail safe. The numeric parser cannot read a datatype
+        # counterexample (a constructor term like `(cons -1 nil)`); it would emit a
+        # garbage pair (e.g. `{'-': '1'}` from the nested `(- 1)`). Only a witness
+        # keyed by the real variables with numeric values is trustworthy — anything
+        # else means "the goal is false but we have no reportable witness" → unknown,
+        # never a `proven_unequal` carrying a misleading witness.
+        if _usable_witness(dis.witness, labels):
+            return _store(key, CertifyResult("proven_unequal", False, "fmf-fun",
+                                             witness=dis.witness,
+                                             detail="cvc5 found a counterexample"))
+        return _store(key, CertifyResult("unknown", False, "rejected",
+                                         detail="cvc5 refuted the goal but the counterexample is a "
+                                                "datatype term with no numeric witness"))
 
     # 2) Prove (structural induction), with an optional Alethe+Carcara re-check.
     res = cvc5_prover.prove(prove_src, want_certificate=True)
@@ -528,6 +766,18 @@ def _store(key: str, result: CertifyResult) -> CertifyResult:
     return result
 
 
+_NUM_WITNESS = re.compile(r"^-?\d+(?:\.\d+)?$")
+
+
+def _usable_witness(witness: dict | None, labels: list[str]) -> bool:
+    """A witness is reportable only if every entry names a real variable (one of the
+    `get-value` labels) and carries a numeric value. Rejects the misparsed fragments
+    a datatype counterexample produces (`{'-': '1'}`), so D4 degrades them to unknown."""
+    if not witness:
+        return False
+    return all(k in labels and _NUM_WITNESS.match(str(v)) for k, v in witness.items())
+
+
 # ---------------------------------------------------------------------------
 # Grading the STUDENT's derivation strictly (rule-instance, NOT value-equivalence).
 #
@@ -549,6 +799,29 @@ class GradeResult:
     witness: dict | None = None      # numeric counterexample, when status == "refuted"
     smtlib: str = ""                 # the SMT-LIB the solver accepted (certificate)
     ruleset: dict | None = None      # per-rule proof status, for meta
+
+
+def _base_node(dt: _Datatype) -> dict:
+    """The base constructor as a MathNode: ℕ `0`, or a nullary `apply` (e.g. `nil`)."""
+    if dt.name == "Nat":
+        return {"type": "number", "value": "0"}
+    return {"type": "apply", "value": dt.base_ctor().name, "slots": {"args": []}}
+
+
+def _step_node(dt: _Datatype, var: str) -> tuple[dict, list[str]]:
+    """The step constructor as a MathNode + the recursion-variable name(s) the IH is
+    taken at. ℕ reuses the induction variable as the predecessor (`succ n`, IH at `n`
+    — legacy); other datatypes name each field by its descriptor field name and take
+    an IH at every recursive field (`cons h t`, IH at `t`; trees → two IHs, M3)."""
+    step_c = dt.step_ctor()
+    if dt.name == "Nat":
+        return ({"type": "succ", "slots": {"inner": [{"type": "variable", "value": var}]}}, [var])
+    args, rec_vars = [], []
+    for f in step_c.fields:
+        args.append({"type": "variable", "value": f.name})
+        if f.sort == dt.name:
+            rec_vars.append(f.name)
+    return ({"type": "apply", "value": step_c.name, "slots": {"args": args}}, rec_vars)
 
 
 def grade_derivation(ex: dict, sub: dict) -> GradeResult:
@@ -583,9 +856,13 @@ def grade_derivation(ex: dict, sub: dict) -> GradeResult:
                            "no induction derivation submitted (need both a base-case and an "
                            "inductive-step derivation)", ruleset=ruleset_meta)
 
+    try:
+        dt = _parse_datatype(ex)
+    except InductionError as e:
+        return GradeResult("untranslatable", str(e), ruleset=ruleset_meta)
     rules = step_check.build_rules(ex, {rid for rid, p in proven.items() if p.proven})
     ac = step_check.ac_ops(ex)   # () unless exercise.options.ac_normalization
-    base0 = step_check.substitute(goal, var, {"type": "number", "value": "0"})
+    base0 = step_check.substitute(goal, var, _base_node(dt))
     base = step_check.check_case(base0, base_steps, rules, ih=None, ac=ac)
     if base.status == "invalid":
         return GradeResult("invalid", f"base case: {base.reason}", ruleset=ruleset_meta)
@@ -594,10 +871,24 @@ def grade_derivation(ex: dict, sub: dict) -> GradeResult:
     if not step_check.is_reflexive(base.final, ac):
         return GradeResult("invalid", "base case did not reduce both sides to a common form (t = t)",
                            ruleset=ruleset_meta)
-    succ = {"type": "succ", "slots": {"inner": [{"type": "variable", "value": var}]}}
-    step0 = step_check.substitute(goal, var, succ)
-    ih = (goal["slots"]["left"][0], goal["slots"]["right"][0])
-    stp = step_check.check_case(step0, step_steps, rules, ih=ih, ac=ac)
+    step_node, rec_vars = _step_node(dt, var)
+    if not rec_vars:
+        return GradeResult("uncertifiable",
+                           f"{dt.name} step constructor has no recursive position", ruleset=ruleset_meta)
+    step0 = step_check.substitute(goal, var, step_node)
+    # One IH per recursive field — `P(n)` for ℕ, the tail `P(t)` for a list, and BOTH
+    # `P(l)` and `P(r)` for a binary tree. Each is P at that recursion field, universal
+    # in its accumulators (wildcarded), matching the goal cvc5 co-quantifies. Wildcarding
+    # lets the student apply an IH at a *shifted* accumulator (fact_aux at x·(S n), sum at
+    # a+h, aux at (a+1) then (a+1)+nodes l); check_case recovers the instance and re-checks
+    # which IH each kind-B step used.
+    ihs = []
+    for rv in rec_vars:
+        rv_node = {"type": "variable", "value": rv}
+        ihs.append(
+            (step_check.generalize_ih(step_check.substitute(goal["slots"]["left"][0], var, rv_node), rv),
+             step_check.generalize_ih(step_check.substitute(goal["slots"]["right"][0], var, rv_node), rv)))
+    stp = step_check.check_case(step0, step_steps, rules, ih=ihs, ac=ac)
     if stp.status == "invalid":
         return GradeResult("invalid", f"inductive step: {stp.reason}", ruleset=ruleset_meta)
     if stp.status != "certified":
