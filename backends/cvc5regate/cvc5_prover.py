@@ -201,11 +201,14 @@ def disprove(disprove_source: str, value_labels: list[str]) -> SolveResult:
     res = SolveResult(verdict, detail)
     if verdict == "sat":
         values = _parse_values(detail)
-        # Map cvc5's `(val n)` style labels back to the bare variable names.
+        # Map cvc5's get-value keys back to the requested labels. A ℕ variable is read
+        # as `(val n)`; everything else is its bare name. Match EXACTLY on those two
+        # forms — a substring test let a one-char accumulator (`a`, `l`, `v`) collide
+        # with the `(val n)` key and clobber its own value.
         witness: dict[str, str] = {}
         for lbl in value_labels:
             for k, v in values.items():
-                if lbl in k:
+                if k == lbl or k == f"(val {lbl})":
                     witness[lbl] = v
         res.witness = witness or values or None
     _CACHE[key] = res

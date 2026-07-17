@@ -51,14 +51,13 @@ def replace(node: dict, path, new: dict) -> dict:
 def instantiate(template: dict, env: dict) -> dict:
     if template["type"] == "wild":
         return copy.deepcopy(env[template["value"]])
-    if "slots" not in template:
-        out = {"type": template["type"]}
-        if "value" in template:
-            out["value"] = template["value"]
-        return out
-    return {"type": template["type"],
-            "slots": {k: [instantiate(x, env) for x in v]
-                      for k, v in template["slots"].items()}}
+    out = {"type": template["type"]}
+    if "value" in template:                       # e.g. an `apply` carries the fn name
+        out["value"] = template["value"]
+    if "slots" in template:
+        out["slots"] = {k: [instantiate(x, env) for x in v]
+                        for k, v in template["slots"].items()}
+    return out
 
 
 def substitute(node: dict, var: str, repl: dict) -> dict:

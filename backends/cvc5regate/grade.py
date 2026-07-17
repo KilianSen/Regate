@@ -7,7 +7,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import cvc5_induction
 import cvc5_prover
 
-PROTOCOL = "1.0"
+PROTOCOL = "1.1"
 BACKEND = "cvc5regate"
 VERSION = "0.1.0"
 

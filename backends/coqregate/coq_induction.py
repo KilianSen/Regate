@@ -421,6 +421,18 @@ def grade_derivation(ex: dict, sub: dict) -> GradeResult:
         return GradeResult("untranslatable", "goal must be an equality with an inductionVar")
     var = str(var)
 
+    # Decline vocabulary Coqregate cannot translate to its kernel (e.g. the `apply`
+    # node — generic recursive functions — which is a cvc5regate capability) BEFORE
+    # symbolic step-checking. Otherwise the strict rule-instance checker runs on an
+    # untranslatable goal and reports a misleading `invalid_derivation` on a student
+    # derivation it never actually certifies. Unimplemented ⇒ `unknown`, not `invalid`.
+    try:
+        _infer(goal, "Q", {})
+        _term(goal["slots"]["left"][0], "Q")
+        _term(goal["slots"]["right"][0], "Q")
+    except (InductionError, KeyError, IndexError, TypeError) as e:
+        return GradeResult("untranslatable", f"goal is outside Coqregate's fragment: {e}")
+
     # Prove the transmitted ruleset FIRST: a rule Coq cannot prove may never be
     # composed into a certified derivation, however correctly the student applies it.
     proven = prove_ruleset(ex)

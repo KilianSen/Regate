@@ -8,7 +8,7 @@ import lean_check
 import lean_prover
 import lean_induction
 
-PROTOCOL = "1.0"
+PROTOCOL = "1.1"
 BACKEND = "leanregate"
 VERSION = "0.1.0"
 
@@ -101,6 +101,21 @@ def grade(request: dict) -> dict:
         if not ex.get("goal"):
             raise RequestError("induction mode requires exercise.goal")
         _validate_node(ex["goal"], "exercise.goal")
+        # Decline vocabulary Leanregate cannot translate to its kernel (e.g. the
+        # `apply` node / datatype induction — cvc5regate capabilities) BEFORE the
+        # symbolic step-check, which would otherwise run on an untranslatable goal and
+        # report a misleading `invalid_derivation`. Unimplemented ⇒ `unknown`.
+        goal = ex["goal"]
+        try:
+            lean_induction._infer(goal, "Q", {})
+            lean_induction._term(goal["slots"]["left"][0], "Q")
+            lean_induction._term(goal["slots"]["right"][0], "Q")
+        except (lean_induction.InductionError, KeyError, IndexError, TypeError) as e:
+            meta["induction"] = {"var": ex.get("inductionVar"), "submission": "untranslatable",
+                                 "reason": str(e)}
+            return _envelope("unknown", None, False, meta=meta,
+                             feedback=f"Leanregate could not certify this induction: the goal is "
+                                      f"outside its fragment ({e}). Route to review.")
         rep = lean_check.check_induction(ex, sub, rules_table)
         meta["induction"] = {"var": ex.get("inductionVar"), "submission": rep.status,
                              "reason": rep.reason}

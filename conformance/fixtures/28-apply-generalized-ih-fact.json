@@ -1,0 +1,762 @@
+{
+  "name": "28-apply-generalized-ih-fact",
+  "description": "A full induction derivation over `apply` with a GENERALIZED inductive hypothesis (since 1.1): fact_aux x n = x*fact n, induction on n. The step unfolds fact_aux x (S n) to fact_aux (x*(S n)) n, then applies the IH at the SHIFTED accumulator x*(S n) - sound because cvc5 co-quantifies x (the induction var is quantified first so --quant-ind inducts on n). cvc5regate certifies each step against a just-proven rule and backstops the leap. The other backends decline per the Unimplemented-vocabulary rule: eggregate cannot parse `apply` (400), leanregate/coqregate parse but cannot translate it (unknown). Pins C1 (apply) + C2 (generalized IH).",
+  "request": {
+    "protocol": "1.1",
+    "exercise": {
+      "id": "fact-aux-generalized-ih",
+      "mode": "induction",
+      "goal": {
+        "type": "eq",
+        "slots": {
+          "left": [
+            {
+              "type": "apply",
+              "value": "fact_aux",
+              "slots": {
+                "args": [
+                  {
+                    "type": "variable",
+                    "value": "x"
+                  },
+                  {
+                    "type": "variable",
+                    "value": "n"
+                  }
+                ]
+              }
+            }
+          ],
+          "right": [
+            {
+              "type": "mul",
+              "slots": {
+                "left": [
+                  {
+                    "type": "variable",
+                    "value": "x"
+                  }
+                ],
+                "right": [
+                  {
+                    "type": "apply",
+                    "value": "fact",
+                    "slots": {
+                      "args": [
+                        {
+                          "type": "variable",
+                          "value": "n"
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "inductionVar": "n",
+      "domain": "int",
+      "definitions": [
+        {
+          "id": "factaux_zero",
+          "lhs": {
+            "type": "apply",
+            "value": "fact_aux",
+            "slots": {
+              "args": [
+                {
+                  "type": "wild",
+                  "value": "x"
+                },
+                {
+                  "type": "number",
+                  "value": "0"
+                }
+              ]
+            }
+          },
+          "rhs": {
+            "type": "wild",
+            "value": "x"
+          },
+          "bidirectional": false,
+          "conditions": []
+        },
+        {
+          "id": "factaux_succ",
+          "lhs": {
+            "type": "apply",
+            "value": "fact_aux",
+            "slots": {
+              "args": [
+                {
+                  "type": "wild",
+                  "value": "x"
+                },
+                {
+                  "type": "succ",
+                  "slots": {
+                    "inner": [
+                      {
+                        "type": "wild",
+                        "value": "k"
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          },
+          "rhs": {
+            "type": "apply",
+            "value": "fact_aux",
+            "slots": {
+              "args": [
+                {
+                  "type": "mul",
+                  "slots": {
+                    "left": [
+                      {
+                        "type": "wild",
+                        "value": "x"
+                      }
+                    ],
+                    "right": [
+                      {
+                        "type": "succ",
+                        "slots": {
+                          "inner": [
+                            {
+                              "type": "wild",
+                              "value": "k"
+                            }
+                          ]
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "type": "wild",
+                  "value": "k"
+                }
+              ]
+            }
+          },
+          "bidirectional": false,
+          "conditions": []
+        },
+        {
+          "id": "fact_zero",
+          "lhs": {
+            "type": "apply",
+            "value": "fact",
+            "slots": {
+              "args": [
+                {
+                  "type": "number",
+                  "value": "0"
+                }
+              ]
+            }
+          },
+          "rhs": {
+            "type": "number",
+            "value": "1"
+          },
+          "bidirectional": false,
+          "conditions": []
+        },
+        {
+          "id": "fact_succ",
+          "lhs": {
+            "type": "apply",
+            "value": "fact",
+            "slots": {
+              "args": [
+                {
+                  "type": "succ",
+                  "slots": {
+                    "inner": [
+                      {
+                        "type": "wild",
+                        "value": "k"
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          },
+          "rhs": {
+            "type": "mul",
+            "slots": {
+              "left": [
+                {
+                  "type": "succ",
+                  "slots": {
+                    "inner": [
+                      {
+                        "type": "wild",
+                        "value": "k"
+                      }
+                    ]
+                  }
+                }
+              ],
+              "right": [
+                {
+                  "type": "apply",
+                  "value": "fact",
+                  "slots": {
+                    "args": [
+                      {
+                        "type": "wild",
+                        "value": "k"
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          },
+          "bidirectional": false,
+          "conditions": []
+        }
+      ],
+      "ruleset": [
+        {
+          "id": "mul_one_right",
+          "lhs": {
+            "type": "mul",
+            "slots": {
+              "left": [
+                {
+                  "type": "wild",
+                  "value": "a"
+                }
+              ],
+              "right": [
+                {
+                  "type": "number",
+                  "value": "1"
+                }
+              ]
+            }
+          },
+          "rhs": {
+            "type": "wild",
+            "value": "a"
+          },
+          "bidirectional": false,
+          "conditions": []
+        }
+      ],
+      "options": {
+        "ac_normalization": true
+      }
+    },
+    "submission": {
+      "base": {
+        "steps": [
+          {
+            "rule": "factaux_zero",
+            "path": [
+              0
+            ],
+            "result": {
+              "type": "eq",
+              "slots": {
+                "left": [
+                  {
+                    "type": "variable",
+                    "value": "x"
+                  }
+                ],
+                "right": [
+                  {
+                    "type": "mul",
+                    "slots": {
+                      "left": [
+                        {
+                          "type": "variable",
+                          "value": "x"
+                        }
+                      ],
+                      "right": [
+                        {
+                          "type": "apply",
+                          "value": "fact",
+                          "slots": {
+                            "args": [
+                              {
+                                "type": "number",
+                                "value": "0"
+                              }
+                            ]
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "rule": "fact_zero",
+            "path": [
+              1,
+              1
+            ],
+            "result": {
+              "type": "eq",
+              "slots": {
+                "left": [
+                  {
+                    "type": "variable",
+                    "value": "x"
+                  }
+                ],
+                "right": [
+                  {
+                    "type": "mul",
+                    "slots": {
+                      "left": [
+                        {
+                          "type": "variable",
+                          "value": "x"
+                        }
+                      ],
+                      "right": [
+                        {
+                          "type": "number",
+                          "value": "1"
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "rule": "mul_one_right",
+            "path": [
+              1
+            ],
+            "result": {
+              "type": "eq",
+              "slots": {
+                "left": [
+                  {
+                    "type": "variable",
+                    "value": "x"
+                  }
+                ],
+                "right": [
+                  {
+                    "type": "variable",
+                    "value": "x"
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "step": {
+        "steps": [
+          {
+            "rule": "factaux_succ",
+            "path": [
+              0
+            ],
+            "result": {
+              "type": "eq",
+              "slots": {
+                "left": [
+                  {
+                    "type": "apply",
+                    "value": "fact_aux",
+                    "slots": {
+                      "args": [
+                        {
+                          "type": "mul",
+                          "slots": {
+                            "left": [
+                              {
+                                "type": "variable",
+                                "value": "x"
+                              }
+                            ],
+                            "right": [
+                              {
+                                "type": "succ",
+                                "slots": {
+                                  "inner": [
+                                    {
+                                      "type": "variable",
+                                      "value": "n"
+                                    }
+                                  ]
+                                }
+                              }
+                            ]
+                          }
+                        },
+                        {
+                          "type": "variable",
+                          "value": "n"
+                        }
+                      ]
+                    }
+                  }
+                ],
+                "right": [
+                  {
+                    "type": "mul",
+                    "slots": {
+                      "left": [
+                        {
+                          "type": "variable",
+                          "value": "x"
+                        }
+                      ],
+                      "right": [
+                        {
+                          "type": "apply",
+                          "value": "fact",
+                          "slots": {
+                            "args": [
+                              {
+                                "type": "succ",
+                                "slots": {
+                                  "inner": [
+                                    {
+                                      "type": "variable",
+                                      "value": "n"
+                                    }
+                                  ]
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "kind": "B",
+            "path": [
+              0
+            ],
+            "equation": [
+              {
+                "type": "apply",
+                "value": "fact_aux",
+                "slots": {
+                  "args": [
+                    {
+                      "type": "mul",
+                      "slots": {
+                        "left": [
+                          {
+                            "type": "variable",
+                            "value": "x"
+                          }
+                        ],
+                        "right": [
+                          {
+                            "type": "succ",
+                            "slots": {
+                              "inner": [
+                                {
+                                  "type": "variable",
+                                  "value": "n"
+                                }
+                              ]
+                            }
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "type": "variable",
+                      "value": "n"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "mul",
+                "slots": {
+                  "left": [
+                    {
+                      "type": "mul",
+                      "slots": {
+                        "left": [
+                          {
+                            "type": "variable",
+                            "value": "x"
+                          }
+                        ],
+                        "right": [
+                          {
+                            "type": "succ",
+                            "slots": {
+                              "inner": [
+                                {
+                                  "type": "variable",
+                                  "value": "n"
+                                }
+                              ]
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  ],
+                  "right": [
+                    {
+                      "type": "apply",
+                      "value": "fact",
+                      "slots": {
+                        "args": [
+                          {
+                            "type": "variable",
+                            "value": "n"
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }
+              }
+            ],
+            "result": {
+              "type": "eq",
+              "slots": {
+                "left": [
+                  {
+                    "type": "mul",
+                    "slots": {
+                      "left": [
+                        {
+                          "type": "mul",
+                          "slots": {
+                            "left": [
+                              {
+                                "type": "variable",
+                                "value": "x"
+                              }
+                            ],
+                            "right": [
+                              {
+                                "type": "succ",
+                                "slots": {
+                                  "inner": [
+                                    {
+                                      "type": "variable",
+                                      "value": "n"
+                                    }
+                                  ]
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      ],
+                      "right": [
+                        {
+                          "type": "apply",
+                          "value": "fact",
+                          "slots": {
+                            "args": [
+                              {
+                                "type": "variable",
+                                "value": "n"
+                              }
+                            ]
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ],
+                "right": [
+                  {
+                    "type": "mul",
+                    "slots": {
+                      "left": [
+                        {
+                          "type": "variable",
+                          "value": "x"
+                        }
+                      ],
+                      "right": [
+                        {
+                          "type": "apply",
+                          "value": "fact",
+                          "slots": {
+                            "args": [
+                              {
+                                "type": "succ",
+                                "slots": {
+                                  "inner": [
+                                    {
+                                      "type": "variable",
+                                      "value": "n"
+                                    }
+                                  ]
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "rule": "fact_succ",
+            "path": [
+              1,
+              1
+            ],
+            "result": {
+              "type": "eq",
+              "slots": {
+                "left": [
+                  {
+                    "type": "mul",
+                    "slots": {
+                      "left": [
+                        {
+                          "type": "mul",
+                          "slots": {
+                            "left": [
+                              {
+                                "type": "variable",
+                                "value": "x"
+                              }
+                            ],
+                            "right": [
+                              {
+                                "type": "succ",
+                                "slots": {
+                                  "inner": [
+                                    {
+                                      "type": "variable",
+                                      "value": "n"
+                                    }
+                                  ]
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      ],
+                      "right": [
+                        {
+                          "type": "apply",
+                          "value": "fact",
+                          "slots": {
+                            "args": [
+                              {
+                                "type": "variable",
+                                "value": "n"
+                              }
+                            ]
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ],
+                "right": [
+                  {
+                    "type": "mul",
+                    "slots": {
+                      "left": [
+                        {
+                          "type": "variable",
+                          "value": "x"
+                        }
+                      ],
+                      "right": [
+                        {
+                          "type": "mul",
+                          "slots": {
+                            "left": [
+                              {
+                                "type": "succ",
+                                "slots": {
+                                  "inner": [
+                                    {
+                                      "type": "variable",
+                                      "value": "n"
+                                    }
+                                  ]
+                                }
+                              }
+                            ],
+                            "right": [
+                              {
+                                "type": "apply",
+                                "value": "fact",
+                                "slots": {
+                                  "args": [
+                                    {
+                                      "type": "variable",
+                                      "value": "n"
+                                    }
+                                  ]
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      }
+    }
+  },
+  "expect": {
+    "eggregate": {
+      "error": true
+    },
+    "leanregate": {
+      "outcome": "unknown",
+      "score": null,
+      "certified": false
+    },
+    "coqregate": {
+      "outcome": "unknown",
+      "score": null,
+      "certified": false
+    },
+    "cvc5regate": {
+      "outcome": "proven_equal",
+      "score": 100,
+      "certified": true,
+      "has_proof": true,
+      "requires": "cvc5"
+    }
+  }
+}

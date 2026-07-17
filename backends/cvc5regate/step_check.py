@@ -51,14 +51,13 @@ def replace(node: dict, path, new: dict) -> dict:
 def instantiate(template: dict, env: dict) -> dict:
     if template["type"] == "wild":
         return copy.deepcopy(env[template["value"]])
-    if "slots" not in template:
-        out = {"type": template["type"]}
-        if "value" in template:
-            out["value"] = template["value"]
-        return out
-    return {"type": template["type"],
-            "slots": {k: [instantiate(x, env) for x in v]
-                      for k, v in template["slots"].items()}}
+    out = {"type": template["type"]}
+    if "value" in template:                       # e.g. an `apply` carries the fn name
+        out["value"] = template["value"]
+    if "slots" in template:
+        out["slots"] = {k: [instantiate(x, env) for x in v]
+                        for k, v in template["slots"].items()}
+    return out
 
 
 def substitute(node: dict, var: str, repl: dict) -> dict:
@@ -70,6 +69,32 @@ def substitute(node: dict, var: str, repl: dict) -> dict:
         for i, ch in enumerate(kids):
             kids[i] = substitute(ch, var, repl)
     return out
+
+
+def generalize_ih(node: dict, indvar: str) -> dict:
+    """Turn every `variable` except the induction variable into a `wild` of the same
+    name. The inductive hypothesis is universal in its accumulators (cvc5 co-quantifies
+    them in build_prove_source), so in the step the student may apply it at a *shifted*
+    accumulator — `_match` recovers that instance. The induction variable stays literal:
+    the IH holds at `n`, not at an arbitrary value."""
+    if node.get("type") == "variable" and str(node.get("value")) != indvar:
+        return {"type": "wild", "value": node["value"]}
+    out = {"type": node.get("type")}
+    if "value" in node:
+        out["value"] = node["value"]
+    if "slots" in node:
+        out["slots"] = {k: [generalize_ih(c, indvar) for c in v]
+                        for k, v in node["slots"].items()}
+    return out
+
+
+def _wild_names(node: dict) -> set:
+    """Every `wild` name appearing in a template."""
+    names = {node["value"]} if node.get("type") == "wild" else set()
+    for kids in (node.get("slots") or {}).values():
+        for k in kids:
+            names |= _wild_names(k)
+    return names
 
 
 # ---------------------------------------------------------------------------
@@ -275,26 +300,50 @@ def _check_step(state: dict, step: dict, rules: dict[str, Rule], ac: tuple) -> t
 
 
 def check_case(source: dict, steps: list[dict], rules: dict[str, Rule],
-               ih: tuple[dict, dict] | None, ac: tuple = ()) -> CaseReport:
-    """Replay one obligation. `ih=(lhs,rhs)` licenses a kind-B substitution by the
-    inductive hypothesis (step only); the base passes ih=None."""
+               ih, ac: tuple = ()) -> CaseReport:
+    """Replay one obligation. `ih` licenses a kind-B substitution by an inductive
+    hypothesis (step only); the base passes ih=None. `ih` is None, a single
+    `(lhs, rhs)` tuple, or a **list** of them — a binary tree's step has one IH per
+    recursive child (`P(l)`, `P(r)`), and a kind-B step may apply any of them."""
+    if ih is None:
+        ihs: list = []
+    elif isinstance(ih, tuple):
+        ihs = [ih]
+    else:
+        ihs = list(ih)
     state = source
     for i, step in enumerate(steps):
         if step.get("kind") == "B":
-            if ih is None:
+            if not ihs:
                 return CaseReport("uncertifiable", None, f"step {i}: IH substitution with no hypothesis available")
-            eqn = step.get("equation")
-            if not (isinstance(eqn, list) and len(eqn) == 2
-                    and ac_equal(eqn[0], ih[0], ac) and ac_equal(eqn[1], ih[1], ac)):
-                return CaseReport("invalid", None, f"step {i}: substitution is not the inductive hypothesis")
             path = tuple(step.get("path", []))
             try:
                 target = at(state, path)
             except (IndexError, KeyError, TypeError):
                 return CaseReport("invalid", None, f"step {i}: path {list(path)} is not in the expression")
-            if not ac_equal(target, ih[0], ac):
-                return CaseReport("invalid", None, f"step {i}: the substituted subterm is not the IH's LHS")
-            result = replace(state, path, copy.deepcopy(ih[1]))
+            # Each IH is generalized over its accumulators (wildcarded by
+            # grade_derivation). Recover the instance σ the student applies by matching
+            # an IH's LHS against the target subterm; a pure-ℕ IH has no wildcards, so
+            # this reduces to the old exact match. Try every available IH and accept the
+            # first whose instance equals the student's declared `equation` — a tree
+            # step applies P(l) then P(r) at different subterms. Sound because cvc5
+            # certifies the *co-quantified* goal, the same universal each IH claims.
+            eqn = step.get("equation")
+            if not (isinstance(eqn, list) and len(eqn) == 2):
+                return CaseReport("invalid", None, f"step {i}: kind-B step needs an [lhs, rhs] equation")
+            ih_rhs = None
+            for h in ihs:
+                sigma = _match(h[0], target, {}, ac)
+                if sigma is None or not _wild_names(h[1]) <= set(sigma):
+                    continue
+                cand_lhs, cand_rhs = instantiate(h[0], sigma), instantiate(h[1], sigma)
+                if ac_equal(eqn[0], cand_lhs, ac) and ac_equal(eqn[1], cand_rhs, ac):
+                    ih_rhs = cand_rhs
+                    break
+            if ih_rhs is None:
+                return CaseReport("invalid", None,
+                                  f"step {i}: substitution is not an instance of the inductive hypothesis")
+            result = replace(state, path, copy.deepcopy(ih_rhs))
             claimed = step.get("result")
             if claimed is not None and not ac_equal(claimed, result, ac):
                 return CaseReport("invalid", None, f"step {i}: claimed result does not match the IH substitution")

@@ -1,0 +1,757 @@
+{
+  "name": "29-datatype-list-induction",
+  "description": "Datatype induction over LISTS (since 1.1): sum l a = a + summa l, induction on the list l via exercise.datatype (nil/cons). The step unfolds sum (cons h t) a to sum t (a+h), then applies the IH P(t) at the SHIFTED accumulator a+h; cvc5regate declares Lst, translates sum/summa to define-fun-rec (recursing on the FIRST arg), and certifies by structural induction (induction var quantified first). The other backends decline per the Unimplemented-vocabulary rule: eggregate cannot parse `apply` (400); leanregate/coqregate parse but cannot translate the datatype (unknown). Pins C3 (datatype induction) + the list `apply` constructors.",
+  "request": {
+    "protocol": "1.1",
+    "exercise": {
+      "id": "list-sum-accumulator",
+      "mode": "induction",
+      "goal": {
+        "type": "eq",
+        "slots": {
+          "left": [
+            {
+              "type": "apply",
+              "value": "sum",
+              "slots": {
+                "args": [
+                  {
+                    "type": "variable",
+                    "value": "l"
+                  },
+                  {
+                    "type": "variable",
+                    "value": "a"
+                  }
+                ]
+              }
+            }
+          ],
+          "right": [
+            {
+              "type": "add",
+              "slots": {
+                "left": [
+                  {
+                    "type": "variable",
+                    "value": "a"
+                  }
+                ],
+                "right": [
+                  {
+                    "type": "apply",
+                    "value": "summa",
+                    "slots": {
+                      "args": [
+                        {
+                          "type": "variable",
+                          "value": "l"
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "inductionVar": "l",
+      "datatype": {
+        "name": "Lst",
+        "constructors": [
+          {
+            "name": "nil",
+            "fields": []
+          },
+          {
+            "name": "cons",
+            "fields": [
+              {
+                "name": "h",
+                "sort": "int"
+              },
+              {
+                "name": "t",
+                "sort": "Lst"
+              }
+            ]
+          }
+        ]
+      },
+      "domain": "int",
+      "definitions": [
+        {
+          "id": "summa_nil",
+          "lhs": {
+            "type": "apply",
+            "value": "summa",
+            "slots": {
+              "args": [
+                {
+                  "type": "apply",
+                  "value": "nil",
+                  "slots": {
+                    "args": []
+                  }
+                }
+              ]
+            }
+          },
+          "rhs": {
+            "type": "number",
+            "value": "0"
+          },
+          "bidirectional": false,
+          "conditions": []
+        },
+        {
+          "id": "summa_cons",
+          "lhs": {
+            "type": "apply",
+            "value": "summa",
+            "slots": {
+              "args": [
+                {
+                  "type": "apply",
+                  "value": "cons",
+                  "slots": {
+                    "args": [
+                      {
+                        "type": "wild",
+                        "value": "h"
+                      },
+                      {
+                        "type": "wild",
+                        "value": "t"
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          },
+          "rhs": {
+            "type": "add",
+            "slots": {
+              "left": [
+                {
+                  "type": "wild",
+                  "value": "h"
+                }
+              ],
+              "right": [
+                {
+                  "type": "apply",
+                  "value": "summa",
+                  "slots": {
+                    "args": [
+                      {
+                        "type": "wild",
+                        "value": "t"
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          },
+          "bidirectional": false,
+          "conditions": []
+        },
+        {
+          "id": "sum_nil",
+          "lhs": {
+            "type": "apply",
+            "value": "sum",
+            "slots": {
+              "args": [
+                {
+                  "type": "apply",
+                  "value": "nil",
+                  "slots": {
+                    "args": []
+                  }
+                },
+                {
+                  "type": "wild",
+                  "value": "a"
+                }
+              ]
+            }
+          },
+          "rhs": {
+            "type": "wild",
+            "value": "a"
+          },
+          "bidirectional": false,
+          "conditions": []
+        },
+        {
+          "id": "sum_cons",
+          "lhs": {
+            "type": "apply",
+            "value": "sum",
+            "slots": {
+              "args": [
+                {
+                  "type": "apply",
+                  "value": "cons",
+                  "slots": {
+                    "args": [
+                      {
+                        "type": "wild",
+                        "value": "h"
+                      },
+                      {
+                        "type": "wild",
+                        "value": "t"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "type": "wild",
+                  "value": "a"
+                }
+              ]
+            }
+          },
+          "rhs": {
+            "type": "apply",
+            "value": "sum",
+            "slots": {
+              "args": [
+                {
+                  "type": "wild",
+                  "value": "t"
+                },
+                {
+                  "type": "add",
+                  "slots": {
+                    "left": [
+                      {
+                        "type": "wild",
+                        "value": "a"
+                      }
+                    ],
+                    "right": [
+                      {
+                        "type": "wild",
+                        "value": "h"
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          },
+          "bidirectional": false,
+          "conditions": []
+        }
+      ],
+      "ruleset": [
+        {
+          "id": "add_zero_right",
+          "lhs": {
+            "type": "add",
+            "slots": {
+              "left": [
+                {
+                  "type": "wild",
+                  "value": "x"
+                }
+              ],
+              "right": [
+                {
+                  "type": "number",
+                  "value": "0"
+                }
+              ]
+            }
+          },
+          "rhs": {
+            "type": "wild",
+            "value": "x"
+          },
+          "bidirectional": false,
+          "conditions": []
+        }
+      ],
+      "options": {
+        "ac_normalization": true
+      }
+    },
+    "submission": {
+      "base": {
+        "steps": [
+          {
+            "rule": "sum_nil",
+            "path": [
+              0
+            ],
+            "result": {
+              "type": "eq",
+              "slots": {
+                "left": [
+                  {
+                    "type": "variable",
+                    "value": "a"
+                  }
+                ],
+                "right": [
+                  {
+                    "type": "add",
+                    "slots": {
+                      "left": [
+                        {
+                          "type": "variable",
+                          "value": "a"
+                        }
+                      ],
+                      "right": [
+                        {
+                          "type": "apply",
+                          "value": "summa",
+                          "slots": {
+                            "args": [
+                              {
+                                "type": "apply",
+                                "value": "nil",
+                                "slots": {
+                                  "args": []
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "rule": "summa_nil",
+            "path": [
+              1,
+              1
+            ],
+            "result": {
+              "type": "eq",
+              "slots": {
+                "left": [
+                  {
+                    "type": "variable",
+                    "value": "a"
+                  }
+                ],
+                "right": [
+                  {
+                    "type": "add",
+                    "slots": {
+                      "left": [
+                        {
+                          "type": "variable",
+                          "value": "a"
+                        }
+                      ],
+                      "right": [
+                        {
+                          "type": "number",
+                          "value": "0"
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "rule": "add_zero_right",
+            "path": [
+              1
+            ],
+            "result": {
+              "type": "eq",
+              "slots": {
+                "left": [
+                  {
+                    "type": "variable",
+                    "value": "a"
+                  }
+                ],
+                "right": [
+                  {
+                    "type": "variable",
+                    "value": "a"
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "step": {
+        "steps": [
+          {
+            "rule": "sum_cons",
+            "path": [
+              0
+            ],
+            "result": {
+              "type": "eq",
+              "slots": {
+                "left": [
+                  {
+                    "type": "apply",
+                    "value": "sum",
+                    "slots": {
+                      "args": [
+                        {
+                          "type": "variable",
+                          "value": "t"
+                        },
+                        {
+                          "type": "add",
+                          "slots": {
+                            "left": [
+                              {
+                                "type": "variable",
+                                "value": "a"
+                              }
+                            ],
+                            "right": [
+                              {
+                                "type": "variable",
+                                "value": "h"
+                              }
+                            ]
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ],
+                "right": [
+                  {
+                    "type": "add",
+                    "slots": {
+                      "left": [
+                        {
+                          "type": "variable",
+                          "value": "a"
+                        }
+                      ],
+                      "right": [
+                        {
+                          "type": "apply",
+                          "value": "summa",
+                          "slots": {
+                            "args": [
+                              {
+                                "type": "apply",
+                                "value": "cons",
+                                "slots": {
+                                  "args": [
+                                    {
+                                      "type": "variable",
+                                      "value": "h"
+                                    },
+                                    {
+                                      "type": "variable",
+                                      "value": "t"
+                                    }
+                                  ]
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "kind": "B",
+            "path": [
+              0
+            ],
+            "equation": [
+              {
+                "type": "apply",
+                "value": "sum",
+                "slots": {
+                  "args": [
+                    {
+                      "type": "variable",
+                      "value": "t"
+                    },
+                    {
+                      "type": "add",
+                      "slots": {
+                        "left": [
+                          {
+                            "type": "variable",
+                            "value": "a"
+                          }
+                        ],
+                        "right": [
+                          {
+                            "type": "variable",
+                            "value": "h"
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "add",
+                "slots": {
+                  "left": [
+                    {
+                      "type": "add",
+                      "slots": {
+                        "left": [
+                          {
+                            "type": "variable",
+                            "value": "a"
+                          }
+                        ],
+                        "right": [
+                          {
+                            "type": "variable",
+                            "value": "h"
+                          }
+                        ]
+                      }
+                    }
+                  ],
+                  "right": [
+                    {
+                      "type": "apply",
+                      "value": "summa",
+                      "slots": {
+                        "args": [
+                          {
+                            "type": "variable",
+                            "value": "t"
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }
+              }
+            ],
+            "result": {
+              "type": "eq",
+              "slots": {
+                "left": [
+                  {
+                    "type": "add",
+                    "slots": {
+                      "left": [
+                        {
+                          "type": "add",
+                          "slots": {
+                            "left": [
+                              {
+                                "type": "variable",
+                                "value": "a"
+                              }
+                            ],
+                            "right": [
+                              {
+                                "type": "variable",
+                                "value": "h"
+                              }
+                            ]
+                          }
+                        }
+                      ],
+                      "right": [
+                        {
+                          "type": "apply",
+                          "value": "summa",
+                          "slots": {
+                            "args": [
+                              {
+                                "type": "variable",
+                                "value": "t"
+                              }
+                            ]
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ],
+                "right": [
+                  {
+                    "type": "add",
+                    "slots": {
+                      "left": [
+                        {
+                          "type": "variable",
+                          "value": "a"
+                        }
+                      ],
+                      "right": [
+                        {
+                          "type": "apply",
+                          "value": "summa",
+                          "slots": {
+                            "args": [
+                              {
+                                "type": "apply",
+                                "value": "cons",
+                                "slots": {
+                                  "args": [
+                                    {
+                                      "type": "variable",
+                                      "value": "h"
+                                    },
+                                    {
+                                      "type": "variable",
+                                      "value": "t"
+                                    }
+                                  ]
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "rule": "summa_cons",
+            "path": [
+              1,
+              1
+            ],
+            "result": {
+              "type": "eq",
+              "slots": {
+                "left": [
+                  {
+                    "type": "add",
+                    "slots": {
+                      "left": [
+                        {
+                          "type": "add",
+                          "slots": {
+                            "left": [
+                              {
+                                "type": "variable",
+                                "value": "a"
+                              }
+                            ],
+                            "right": [
+                              {
+                                "type": "variable",
+                                "value": "h"
+                              }
+                            ]
+                          }
+                        }
+                      ],
+                      "right": [
+                        {
+                          "type": "apply",
+                          "value": "summa",
+                          "slots": {
+                            "args": [
+                              {
+                                "type": "variable",
+                                "value": "t"
+                              }
+                            ]
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ],
+                "right": [
+                  {
+                    "type": "add",
+                    "slots": {
+                      "left": [
+                        {
+                          "type": "variable",
+                          "value": "a"
+                        }
+                      ],
+                      "right": [
+                        {
+                          "type": "add",
+                          "slots": {
+                            "left": [
+                              {
+                                "type": "variable",
+                                "value": "h"
+                              }
+                            ],
+                            "right": [
+                              {
+                                "type": "apply",
+                                "value": "summa",
+                                "slots": {
+                                  "args": [
+                                    {
+                                      "type": "variable",
+                                      "value": "t"
+                                    }
+                                  ]
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      }
+    }
+  },
+  "expect": {
+    "eggregate": {
+      "error": true
+    },
+    "leanregate": {
+      "outcome": "unknown",
+      "score": null,
+      "certified": false
+    },
+    "coqregate": {
+      "outcome": "unknown",
+      "score": null,
+      "certified": false
+    },
+    "cvc5regate": {
+      "outcome": "proven_equal",
+      "score": 100,
+      "certified": true,
+      "has_proof": true,
+      "requires": "cvc5"
+    }
+  }
+}

@@ -1,0 +1,185 @@
+{
+  "name": "27-apply-recursive-sum-disproof",
+  "description": "An induction goal over the `apply` term node (n-ary named function, since 1.1): 2*sum(n) = n*(n+2) is FALSE (the true closed form is n*(n+1)). cvc5regate translates `apply` to a define-fun-rec and disproves it with a numeric witness (n=1). The other backends decline per the Unimplemented-vocabulary rule: eggregate cannot parse `apply` (400 error); leanregate/coqregate parse it but cannot translate it, so they return `unknown`. Pins the `apply` node, `exercise.domain`, and the witness path.",
+  "request": {
+    "protocol": "1.1",
+    "exercise": {
+      "id": "apply-sum-false",
+      "mode": "induction",
+      "goal": {
+        "type": "eq",
+        "slots": {
+          "left": [
+            {
+              "type": "mul",
+              "slots": {
+                "left": [
+                  {
+                    "type": "number",
+                    "value": "2"
+                  }
+                ],
+                "right": [
+                  {
+                    "type": "apply",
+                    "value": "sum",
+                    "slots": {
+                      "args": [
+                        {
+                          "type": "variable",
+                          "value": "n"
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          ],
+          "right": [
+            {
+              "type": "mul",
+              "slots": {
+                "left": [
+                  {
+                    "type": "variable",
+                    "value": "n"
+                  }
+                ],
+                "right": [
+                  {
+                    "type": "add",
+                    "slots": {
+                      "left": [
+                        {
+                          "type": "variable",
+                          "value": "n"
+                        }
+                      ],
+                      "right": [
+                        {
+                          "type": "number",
+                          "value": "2"
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "inductionVar": "n",
+      "domain": "int",
+      "definitions": [
+        {
+          "id": "sum_zero",
+          "lhs": {
+            "type": "apply",
+            "value": "sum",
+            "slots": {
+              "args": [
+                {
+                  "type": "number",
+                  "value": "0"
+                }
+              ]
+            }
+          },
+          "rhs": {
+            "type": "number",
+            "value": "0"
+          },
+          "bidirectional": false,
+          "conditions": []
+        },
+        {
+          "id": "sum_succ",
+          "lhs": {
+            "type": "apply",
+            "value": "sum",
+            "slots": {
+              "args": [
+                {
+                  "type": "succ",
+                  "slots": {
+                    "inner": [
+                      {
+                        "type": "wild",
+                        "value": "k"
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          },
+          "rhs": {
+            "type": "add",
+            "slots": {
+              "left": [
+                {
+                  "type": "succ",
+                  "slots": {
+                    "inner": [
+                      {
+                        "type": "wild",
+                        "value": "k"
+                      }
+                    ]
+                  }
+                }
+              ],
+              "right": [
+                {
+                  "type": "apply",
+                  "value": "sum",
+                  "slots": {
+                    "args": [
+                      {
+                        "type": "wild",
+                        "value": "k"
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          },
+          "bidirectional": false,
+          "conditions": []
+        }
+      ]
+    },
+    "submission": {
+      "base": {
+        "steps": []
+      },
+      "step": {
+        "steps": []
+      }
+    }
+  },
+  "expect": {
+    "eggregate": {
+      "error": true
+    },
+    "leanregate": {
+      "outcome": "unknown",
+      "score": null,
+      "certified": false
+    },
+    "coqregate": {
+      "outcome": "unknown",
+      "score": null,
+      "certified": false
+    },
+    "cvc5regate": {
+      "outcome": "proven_unequal",
+      "score": 0,
+      "has_witness": true,
+      "requires": "cvc5"
+    }
+  }
+}

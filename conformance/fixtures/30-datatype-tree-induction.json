@@ -1,0 +1,1103 @@
+{
+  "name": "30-datatype-tree-induction",
+  "description": "Datatype induction over BINARY TREES with TWO inductive hypotheses (since 1.1): aux t a = a + nodes t, induction on the tree t via exercise.datatype (empty/node, node having two recursive fields l and r). The step unfolds aux (node l v r) a to aux r (aux l (a+1)), then applies IH P(l) at accumulator a+1 and IH P(r) at (a+1)+nodes l \u2014 check_case tries each kind-B step against BOTH server-built IHs. cvc5regate certifies by structural induction over Tree. The other backends decline per the Unimplemented-vocabulary rule: eggregate cannot parse `apply` (400); leanregate/coqregate parse but cannot translate the datatype (unknown). Pins C4 (tree datatype + multi-IH).",
+  "request": {
+    "protocol": "1.1",
+    "exercise": {
+      "id": "tree-nodes-accumulator",
+      "mode": "induction",
+      "goal": {
+        "type": "eq",
+        "slots": {
+          "left": [
+            {
+              "type": "apply",
+              "value": "aux",
+              "slots": {
+                "args": [
+                  {
+                    "type": "variable",
+                    "value": "t"
+                  },
+                  {
+                    "type": "variable",
+                    "value": "a"
+                  }
+                ]
+              }
+            }
+          ],
+          "right": [
+            {
+              "type": "add",
+              "slots": {
+                "left": [
+                  {
+                    "type": "variable",
+                    "value": "a"
+                  }
+                ],
+                "right": [
+                  {
+                    "type": "apply",
+                    "value": "nodes",
+                    "slots": {
+                      "args": [
+                        {
+                          "type": "variable",
+                          "value": "t"
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "inductionVar": "t",
+      "datatype": {
+        "name": "Tree",
+        "constructors": [
+          {
+            "name": "empty",
+            "fields": []
+          },
+          {
+            "name": "node",
+            "fields": [
+              {
+                "name": "l",
+                "sort": "Tree"
+              },
+              {
+                "name": "v",
+                "sort": "int"
+              },
+              {
+                "name": "r",
+                "sort": "Tree"
+              }
+            ]
+          }
+        ]
+      },
+      "domain": "int",
+      "definitions": [
+        {
+          "id": "nodes_empty",
+          "lhs": {
+            "type": "apply",
+            "value": "nodes",
+            "slots": {
+              "args": [
+                {
+                  "type": "apply",
+                  "value": "empty",
+                  "slots": {
+                    "args": []
+                  }
+                }
+              ]
+            }
+          },
+          "rhs": {
+            "type": "number",
+            "value": "0"
+          },
+          "bidirectional": false,
+          "conditions": []
+        },
+        {
+          "id": "nodes_node",
+          "lhs": {
+            "type": "apply",
+            "value": "nodes",
+            "slots": {
+              "args": [
+                {
+                  "type": "apply",
+                  "value": "node",
+                  "slots": {
+                    "args": [
+                      {
+                        "type": "wild",
+                        "value": "l"
+                      },
+                      {
+                        "type": "wild",
+                        "value": "v"
+                      },
+                      {
+                        "type": "wild",
+                        "value": "r"
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          },
+          "rhs": {
+            "type": "add",
+            "slots": {
+              "left": [
+                {
+                  "type": "number",
+                  "value": "1"
+                }
+              ],
+              "right": [
+                {
+                  "type": "add",
+                  "slots": {
+                    "left": [
+                      {
+                        "type": "apply",
+                        "value": "nodes",
+                        "slots": {
+                          "args": [
+                            {
+                              "type": "wild",
+                              "value": "l"
+                            }
+                          ]
+                        }
+                      }
+                    ],
+                    "right": [
+                      {
+                        "type": "apply",
+                        "value": "nodes",
+                        "slots": {
+                          "args": [
+                            {
+                              "type": "wild",
+                              "value": "r"
+                            }
+                          ]
+                        }
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          },
+          "bidirectional": false,
+          "conditions": []
+        },
+        {
+          "id": "aux_empty",
+          "lhs": {
+            "type": "apply",
+            "value": "aux",
+            "slots": {
+              "args": [
+                {
+                  "type": "apply",
+                  "value": "empty",
+                  "slots": {
+                    "args": []
+                  }
+                },
+                {
+                  "type": "wild",
+                  "value": "a"
+                }
+              ]
+            }
+          },
+          "rhs": {
+            "type": "wild",
+            "value": "a"
+          },
+          "bidirectional": false,
+          "conditions": []
+        },
+        {
+          "id": "aux_node",
+          "lhs": {
+            "type": "apply",
+            "value": "aux",
+            "slots": {
+              "args": [
+                {
+                  "type": "apply",
+                  "value": "node",
+                  "slots": {
+                    "args": [
+                      {
+                        "type": "wild",
+                        "value": "l"
+                      },
+                      {
+                        "type": "wild",
+                        "value": "v"
+                      },
+                      {
+                        "type": "wild",
+                        "value": "r"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "type": "wild",
+                  "value": "a"
+                }
+              ]
+            }
+          },
+          "rhs": {
+            "type": "apply",
+            "value": "aux",
+            "slots": {
+              "args": [
+                {
+                  "type": "wild",
+                  "value": "r"
+                },
+                {
+                  "type": "apply",
+                  "value": "aux",
+                  "slots": {
+                    "args": [
+                      {
+                        "type": "wild",
+                        "value": "l"
+                      },
+                      {
+                        "type": "add",
+                        "slots": {
+                          "left": [
+                            {
+                              "type": "wild",
+                              "value": "a"
+                            }
+                          ],
+                          "right": [
+                            {
+                              "type": "number",
+                              "value": "1"
+                            }
+                          ]
+                        }
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          },
+          "bidirectional": false,
+          "conditions": []
+        }
+      ],
+      "ruleset": [
+        {
+          "id": "add_zero_right",
+          "lhs": {
+            "type": "add",
+            "slots": {
+              "left": [
+                {
+                  "type": "wild",
+                  "value": "x"
+                }
+              ],
+              "right": [
+                {
+                  "type": "number",
+                  "value": "0"
+                }
+              ]
+            }
+          },
+          "rhs": {
+            "type": "wild",
+            "value": "x"
+          },
+          "bidirectional": false,
+          "conditions": []
+        }
+      ],
+      "options": {
+        "ac_normalization": true
+      }
+    },
+    "submission": {
+      "base": {
+        "steps": [
+          {
+            "rule": "aux_empty",
+            "path": [
+              0
+            ],
+            "result": {
+              "type": "eq",
+              "slots": {
+                "left": [
+                  {
+                    "type": "variable",
+                    "value": "a"
+                  }
+                ],
+                "right": [
+                  {
+                    "type": "add",
+                    "slots": {
+                      "left": [
+                        {
+                          "type": "variable",
+                          "value": "a"
+                        }
+                      ],
+                      "right": [
+                        {
+                          "type": "apply",
+                          "value": "nodes",
+                          "slots": {
+                            "args": [
+                              {
+                                "type": "apply",
+                                "value": "empty",
+                                "slots": {
+                                  "args": []
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "rule": "nodes_empty",
+            "path": [
+              1,
+              1
+            ],
+            "result": {
+              "type": "eq",
+              "slots": {
+                "left": [
+                  {
+                    "type": "variable",
+                    "value": "a"
+                  }
+                ],
+                "right": [
+                  {
+                    "type": "add",
+                    "slots": {
+                      "left": [
+                        {
+                          "type": "variable",
+                          "value": "a"
+                        }
+                      ],
+                      "right": [
+                        {
+                          "type": "number",
+                          "value": "0"
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "rule": "add_zero_right",
+            "path": [
+              1
+            ],
+            "result": {
+              "type": "eq",
+              "slots": {
+                "left": [
+                  {
+                    "type": "variable",
+                    "value": "a"
+                  }
+                ],
+                "right": [
+                  {
+                    "type": "variable",
+                    "value": "a"
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "step": {
+        "steps": [
+          {
+            "rule": "aux_node",
+            "path": [
+              0
+            ],
+            "result": {
+              "type": "eq",
+              "slots": {
+                "left": [
+                  {
+                    "type": "apply",
+                    "value": "aux",
+                    "slots": {
+                      "args": [
+                        {
+                          "type": "variable",
+                          "value": "r"
+                        },
+                        {
+                          "type": "apply",
+                          "value": "aux",
+                          "slots": {
+                            "args": [
+                              {
+                                "type": "variable",
+                                "value": "l"
+                              },
+                              {
+                                "type": "add",
+                                "slots": {
+                                  "left": [
+                                    {
+                                      "type": "variable",
+                                      "value": "a"
+                                    }
+                                  ],
+                                  "right": [
+                                    {
+                                      "type": "number",
+                                      "value": "1"
+                                    }
+                                  ]
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ],
+                "right": [
+                  {
+                    "type": "add",
+                    "slots": {
+                      "left": [
+                        {
+                          "type": "variable",
+                          "value": "a"
+                        }
+                      ],
+                      "right": [
+                        {
+                          "type": "apply",
+                          "value": "nodes",
+                          "slots": {
+                            "args": [
+                              {
+                                "type": "apply",
+                                "value": "node",
+                                "slots": {
+                                  "args": [
+                                    {
+                                      "type": "variable",
+                                      "value": "l"
+                                    },
+                                    {
+                                      "type": "variable",
+                                      "value": "v"
+                                    },
+                                    {
+                                      "type": "variable",
+                                      "value": "r"
+                                    }
+                                  ]
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "kind": "B",
+            "path": [
+              0,
+              1
+            ],
+            "equation": [
+              {
+                "type": "apply",
+                "value": "aux",
+                "slots": {
+                  "args": [
+                    {
+                      "type": "variable",
+                      "value": "l"
+                    },
+                    {
+                      "type": "add",
+                      "slots": {
+                        "left": [
+                          {
+                            "type": "variable",
+                            "value": "a"
+                          }
+                        ],
+                        "right": [
+                          {
+                            "type": "number",
+                            "value": "1"
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "add",
+                "slots": {
+                  "left": [
+                    {
+                      "type": "add",
+                      "slots": {
+                        "left": [
+                          {
+                            "type": "variable",
+                            "value": "a"
+                          }
+                        ],
+                        "right": [
+                          {
+                            "type": "number",
+                            "value": "1"
+                          }
+                        ]
+                      }
+                    }
+                  ],
+                  "right": [
+                    {
+                      "type": "apply",
+                      "value": "nodes",
+                      "slots": {
+                        "args": [
+                          {
+                            "type": "variable",
+                            "value": "l"
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }
+              }
+            ],
+            "result": {
+              "type": "eq",
+              "slots": {
+                "left": [
+                  {
+                    "type": "apply",
+                    "value": "aux",
+                    "slots": {
+                      "args": [
+                        {
+                          "type": "variable",
+                          "value": "r"
+                        },
+                        {
+                          "type": "add",
+                          "slots": {
+                            "left": [
+                              {
+                                "type": "add",
+                                "slots": {
+                                  "left": [
+                                    {
+                                      "type": "variable",
+                                      "value": "a"
+                                    }
+                                  ],
+                                  "right": [
+                                    {
+                                      "type": "number",
+                                      "value": "1"
+                                    }
+                                  ]
+                                }
+                              }
+                            ],
+                            "right": [
+                              {
+                                "type": "apply",
+                                "value": "nodes",
+                                "slots": {
+                                  "args": [
+                                    {
+                                      "type": "variable",
+                                      "value": "l"
+                                    }
+                                  ]
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ],
+                "right": [
+                  {
+                    "type": "add",
+                    "slots": {
+                      "left": [
+                        {
+                          "type": "variable",
+                          "value": "a"
+                        }
+                      ],
+                      "right": [
+                        {
+                          "type": "apply",
+                          "value": "nodes",
+                          "slots": {
+                            "args": [
+                              {
+                                "type": "apply",
+                                "value": "node",
+                                "slots": {
+                                  "args": [
+                                    {
+                                      "type": "variable",
+                                      "value": "l"
+                                    },
+                                    {
+                                      "type": "variable",
+                                      "value": "v"
+                                    },
+                                    {
+                                      "type": "variable",
+                                      "value": "r"
+                                    }
+                                  ]
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "kind": "B",
+            "path": [
+              0
+            ],
+            "equation": [
+              {
+                "type": "apply",
+                "value": "aux",
+                "slots": {
+                  "args": [
+                    {
+                      "type": "variable",
+                      "value": "r"
+                    },
+                    {
+                      "type": "add",
+                      "slots": {
+                        "left": [
+                          {
+                            "type": "add",
+                            "slots": {
+                              "left": [
+                                {
+                                  "type": "variable",
+                                  "value": "a"
+                                }
+                              ],
+                              "right": [
+                                {
+                                  "type": "number",
+                                  "value": "1"
+                                }
+                              ]
+                            }
+                          }
+                        ],
+                        "right": [
+                          {
+                            "type": "apply",
+                            "value": "nodes",
+                            "slots": {
+                              "args": [
+                                {
+                                  "type": "variable",
+                                  "value": "l"
+                                }
+                              ]
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "add",
+                "slots": {
+                  "left": [
+                    {
+                      "type": "add",
+                      "slots": {
+                        "left": [
+                          {
+                            "type": "add",
+                            "slots": {
+                              "left": [
+                                {
+                                  "type": "variable",
+                                  "value": "a"
+                                }
+                              ],
+                              "right": [
+                                {
+                                  "type": "number",
+                                  "value": "1"
+                                }
+                              ]
+                            }
+                          }
+                        ],
+                        "right": [
+                          {
+                            "type": "apply",
+                            "value": "nodes",
+                            "slots": {
+                              "args": [
+                                {
+                                  "type": "variable",
+                                  "value": "l"
+                                }
+                              ]
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  ],
+                  "right": [
+                    {
+                      "type": "apply",
+                      "value": "nodes",
+                      "slots": {
+                        "args": [
+                          {
+                            "type": "variable",
+                            "value": "r"
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }
+              }
+            ],
+            "result": {
+              "type": "eq",
+              "slots": {
+                "left": [
+                  {
+                    "type": "add",
+                    "slots": {
+                      "left": [
+                        {
+                          "type": "add",
+                          "slots": {
+                            "left": [
+                              {
+                                "type": "add",
+                                "slots": {
+                                  "left": [
+                                    {
+                                      "type": "variable",
+                                      "value": "a"
+                                    }
+                                  ],
+                                  "right": [
+                                    {
+                                      "type": "number",
+                                      "value": "1"
+                                    }
+                                  ]
+                                }
+                              }
+                            ],
+                            "right": [
+                              {
+                                "type": "apply",
+                                "value": "nodes",
+                                "slots": {
+                                  "args": [
+                                    {
+                                      "type": "variable",
+                                      "value": "l"
+                                    }
+                                  ]
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      ],
+                      "right": [
+                        {
+                          "type": "apply",
+                          "value": "nodes",
+                          "slots": {
+                            "args": [
+                              {
+                                "type": "variable",
+                                "value": "r"
+                              }
+                            ]
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ],
+                "right": [
+                  {
+                    "type": "add",
+                    "slots": {
+                      "left": [
+                        {
+                          "type": "variable",
+                          "value": "a"
+                        }
+                      ],
+                      "right": [
+                        {
+                          "type": "apply",
+                          "value": "nodes",
+                          "slots": {
+                            "args": [
+                              {
+                                "type": "apply",
+                                "value": "node",
+                                "slots": {
+                                  "args": [
+                                    {
+                                      "type": "variable",
+                                      "value": "l"
+                                    },
+                                    {
+                                      "type": "variable",
+                                      "value": "v"
+                                    },
+                                    {
+                                      "type": "variable",
+                                      "value": "r"
+                                    }
+                                  ]
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "rule": "nodes_node",
+            "path": [
+              1,
+              1
+            ],
+            "result": {
+              "type": "eq",
+              "slots": {
+                "left": [
+                  {
+                    "type": "add",
+                    "slots": {
+                      "left": [
+                        {
+                          "type": "add",
+                          "slots": {
+                            "left": [
+                              {
+                                "type": "add",
+                                "slots": {
+                                  "left": [
+                                    {
+                                      "type": "variable",
+                                      "value": "a"
+                                    }
+                                  ],
+                                  "right": [
+                                    {
+                                      "type": "number",
+                                      "value": "1"
+                                    }
+                                  ]
+                                }
+                              }
+                            ],
+                            "right": [
+                              {
+                                "type": "apply",
+                                "value": "nodes",
+                                "slots": {
+                                  "args": [
+                                    {
+                                      "type": "variable",
+                                      "value": "l"
+                                    }
+                                  ]
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      ],
+                      "right": [
+                        {
+                          "type": "apply",
+                          "value": "nodes",
+                          "slots": {
+                            "args": [
+                              {
+                                "type": "variable",
+                                "value": "r"
+                              }
+                            ]
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ],
+                "right": [
+                  {
+                    "type": "add",
+                    "slots": {
+                      "left": [
+                        {
+                          "type": "variable",
+                          "value": "a"
+                        }
+                      ],
+                      "right": [
+                        {
+                          "type": "add",
+                          "slots": {
+                            "left": [
+                              {
+                                "type": "number",
+                                "value": "1"
+                              }
+                            ],
+                            "right": [
+                              {
+                                "type": "add",
+                                "slots": {
+                                  "left": [
+                                    {
+                                      "type": "apply",
+                                      "value": "nodes",
+                                      "slots": {
+                                        "args": [
+                                          {
+                                            "type": "variable",
+                                            "value": "l"
+                                          }
+                                        ]
+                                      }
+                                    }
+                                  ],
+                                  "right": [
+                                    {
+                                      "type": "apply",
+                                      "value": "nodes",
+                                      "slots": {
+                                        "args": [
+                                          {
+                                            "type": "variable",
+                                            "value": "r"
+                                          }
+                                        ]
+                                      }
+                                    }
+                                  ]
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      }
+    }
+  },
+  "expect": {
+    "eggregate": {
+      "error": true
+    },
+    "leanregate": {
+      "outcome": "unknown",
+      "score": null,
+      "certified": false
+    },
+    "coqregate": {
+      "outcome": "unknown",
+      "score": null,
+      "certified": false
+    },
+    "cvc5regate": {
+      "outcome": "proven_equal",
+      "score": 100,
+      "certified": true,
+      "has_proof": true,
+      "requires": "cvc5"
+    }
+  }
+}

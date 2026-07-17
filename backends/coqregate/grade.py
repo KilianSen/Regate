@@ -7,7 +7,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import coq_induction
 import coq_prover
 
-PROTOCOL = "1.0"
+PROTOCOL = "1.1"
 BACKEND = "coqregate"
 VERSION = "0.1.0"
 
