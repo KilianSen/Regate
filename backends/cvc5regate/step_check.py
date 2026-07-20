@@ -354,3 +354,44 @@ def check_case(source: dict, steps: list[dict], rules: dict[str, Rule],
             return CaseReport(status, None, f"step {i}: {reason}")
         state = result
     return CaseReport("certified", state)
+
+
+# ---------------------------------------------------------------------------
+# Grading an ordinary (non-induction) transformation/equation derivation.
+# Same strict per-step semantics as check_case, but it reports every step's status
+# in the protocol's StepStatus shape and stops at the first non-valid step. A
+# kind-B (Leibniz) step has no inductive hypothesis to license it here, so it is
+# `open` (uncertifiable) — the caller falls back to the SMT equivalence oracle on
+# the endpoint rather than certifying the substitution symbolically.
+# ---------------------------------------------------------------------------
+@dataclass
+class DerivationReport:
+    status: str                 # "valid" | "invalid" | "uncertifiable"
+    steps_out: list            # [{"index", "status", "reason"}]
+    final: dict | None
+    invalid_index: int | None = None
+    reason: str = ""
+
+
+def check_derivation(source: dict, steps: list[dict], rules: dict[str, Rule],
+                     ac: tuple = ()) -> DerivationReport:
+    state = source
+    steps_out: list[dict] = []
+    for i, step in enumerate(steps):
+        if step.get("kind") == "B":
+            steps_out.append({"index": i, "status": "open",
+                              "reason": "Leibniz substitution is not symbolically certified by "
+                                        "cvc5regate; endpoint equivalence is checked by the solver"})
+            return DerivationReport("uncertifiable", steps_out, None, i,
+                                    steps_out[-1]["reason"])
+        status, result, reason = _check_step(state, step, rules, ac)
+        if status == "valid":
+            steps_out.append({"index": i, "status": "valid", "reason": ""})
+            state = result
+            continue
+        # "invalid" (wrong rule/path/result) vs "uncertifiable" (unknown/unproven/guarded
+        # rule) — the protocol StepStatus is `invalid` or `open` respectively.
+        steps_out.append({"index": i, "status": "invalid" if status == "invalid" else "open",
+                          "reason": reason})
+        return DerivationReport(status, steps_out, None, i, reason)
+    return DerivationReport("valid", steps_out, state)

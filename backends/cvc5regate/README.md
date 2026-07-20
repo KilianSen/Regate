@@ -8,12 +8,16 @@ integrates against that contract once and runs this backend as a self-contained
 container, selected per exercise. (Artemis is the reference adopter; nothing here
 depends on it.)
 
-cvc5regate is an **induction certifier** built on the **cvc5** SMT solver. It
+cvc5regate is an **induction certifier** built on the **cvc5** SMT solver that
+**also grades ordinary `transformation` and `equation` exercises** — the one
+non-eggregate backend that is a *general* grader, not just a specialist. It
 certifies the `base ∧ step ⟹ ∀n. P(n)` induction schema (`mode: "induction"`)
-using cvc5's native structural induction, and it *disproves* false claims with a
-concrete numeric witness. Its footprint is a **single ~21 MB solver binary**
-(~60 MB as a Docker image), and it covers a broad fragment: equalities,
-**inequalities**, **divisibility**, and goals over recursive functions.
+using cvc5's native structural induction, grades step-by-step transformation
+derivations, decides `source ≡ target` equivalence with an SMT oracle, and
+*disproves* false claims with a concrete numeric witness. Its footprint is a
+**single ~21 MB solver binary** (~60 MB as a Docker image), and it covers a broad
+fragment: equalities, **inequalities**, **divisibility**, and goals over recursive
+functions.
 
 ## How it works
 
@@ -33,6 +37,34 @@ the bare theorem. `grade_derivation` runs three stages (`cvc5_induction.py` +
 3. **Backstop the leap**: the *negated, universally-quantified* goal with cvc5's
    structural induction (`--quant-ind`). `unsat` ⇒ the theorem holds ⇒
    `proven_equal` / `certified`, with the emitted SMT-LIB attached as the `proof`.
+
+### Non-induction: `transformation` / `equation`
+
+On `mode: "transformation"` (or `"equation"`) cvc5regate grades with two engines,
+strongest first (`cvc5_equiv.py` + `_grade_equational` in `grade.py`):
+
+1. **Certify the derivation** (if `steps` are submitted): each step must be a valid
+   instance of a transmitted rule (`step_check.check_derivation`, the same strict
+   matcher as the induction obligations). A valid chain reaching the target *form*
+   is `proven_equal` / certified with the ordered rule instances as the proof —
+   **no solver call needed** (rules are trusted by default). A fabricated step ⇒
+   `invalid_derivation`.
+2. **The SMT equivalence oracle** (`decide_equivalence`) grades the endpoint the
+   student reached — used directly for a `final`-only submission, and as the
+   backstop when a derivation is valid-but-unfinished or cannot be certified
+   symbolically (an unknown/unproven rule, a Leibniz step). Disprove-first: a `sat`
+   model of `source ≠ target` ⇒ `proven_unequal` + numeric witness. Then prove:
+   `source = target` as a *plain* validity query (`prove_equiv`, no `--quant-ind`)
+   ⇒ `unsat` ⇒ `proven_equal`. Reaching the target form is 100; an equivalent but
+   unsimplified answer earns partial credit (a structural-distance score, floored
+   at 1 for genuine progress; `options.partial_credit: false` makes it binary).
+
+Outcome/score semantics mirror **eggregate** (the reference general grader), so the
+two are interchangeable on non-induction exercises. The oracle needs *no* ruleset —
+it can prove e.g. `(x+1)(x-1) ≡ x·x−1` that the symbolic backends cannot without a
+distributivity rule in the request (fixture `31`). Non-inductive equivalence
+queries *can* usually export an Alethe proof, so a `proven_equal` here may be
+Carcara-re-checked (`method = "alethe+carcara"`, `meta.equiv.rechecked: true`).
 
 ### The ruleset is trusted by default
 
@@ -98,8 +130,9 @@ to `equal_no_certificate` (honest, not a false grade).
 
 Honesty invariants: `unsat` ⇒ certified `proven_equal`; `sat` + model ⇒
 `proven_unequal` + witness; `unknown` / timeout / outside-fragment /
-toolchain-absent ⇒ `unknown`. Non-induction modes are out of scope and return
-`unknown`.
+toolchain-absent ⇒ `unknown`. This holds for both the induction certifier and the
+non-induction equivalence oracle — the only unsupported mode string is anything
+other than `induction` / `transformation` / `equation`, which is a `400`.
 
 ## Files
 
@@ -114,13 +147,23 @@ toolchain-absent ⇒ `unknown`. Non-induction modes are out of scope and return
   `grade_derivation(ex, sub)` is the grading path (disprove-first, grade the
   student's steps, backstop the leap); `certify(ex)` is the bare-goal oracle it
   calls; `prove_ruleset(ex)` re-solves the ruleset under `verify_rules`.
+- `cvc5_equiv.py` — the **non-induction equivalence oracle**: builds the plain
+  `source = target` prove / free-const disprove SMT sources (reusing the induction
+  translator), `decide_equivalence(ex, a, b)` (disprove-first then prove with an
+  optional Alethe+Carcara re-check), and a structural `distance` for partial credit.
 - `step_check.py` — strict rule-instance checker for the student's steps (shared
-  shape with coqregate's, but a deliberately independent copy).
+  shape with coqregate's, but a deliberately independent copy). `check_case` grades
+  an induction obligation; `check_derivation` grades a plain transformation/equation
+  derivation with per-step `StepStatus` output.
 - `grade.py` — protocol entrypoint (CLI + HTTP), `backend = "cvc5regate"`.
+  `_grade_induction` and `_grade_equational` are the two mode dispatchers.
 - `check_induction.py` — live harness; `--require-cvc5` runs the emitted goals
   through real cvc5 and asserts the MUST_PASS set settles.
 - `tests/test_cvc5_prover.py` — translation / wiring tests against a stubbed
   solver seam, plus an availability-gated real-cvc5 run.
+- `tests/test_cvc5_equiv.py` — non-induction grading tests (transformation +
+  equation) against the stubbed solver seam: target-form, disproof witness,
+  partial credit, derivation certification, and the oracle backstop.
 
 ## Run / deploy
 

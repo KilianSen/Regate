@@ -86,6 +86,10 @@
     "leanregate": {
       "outcome": "proven_equal",
       "score": 100
+    },
+    "cvc5regate": {
+      "outcome": "proven_equal",
+      "score": 100
     }
   }
 }

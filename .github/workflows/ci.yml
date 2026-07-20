@@ -82,6 +82,8 @@ jobs:
         run: pip install cvc5
       - name: cvc5regate unit tests
         run: python backends/cvc5regate/tests/test_cvc5_prover.py
+      - name: cvc5regate non-induction grading tests
+        run: python backends/cvc5regate/tests/test_cvc5_equiv.py
       - name: emitted induction goals solved (live cvc5)
         working-directory: backends/cvc5regate
         run: python check_induction.py --require-cvc5

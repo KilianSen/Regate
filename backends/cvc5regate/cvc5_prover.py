@@ -104,14 +104,21 @@ def recheck_alethe(smt2_source: str, alethe_proof: str) -> bool:
 _ALETHE_UNSUPPORTED = re.compile(r"unsupported by alethe|untranslated|\berror\b", re.I)
 
 
-def try_alethe_proof(prove_source: str) -> str | None:
+_ALETHE_ARGS = ["--produce-proofs", "--proof-format-mode=alethe",
+                "--proof-alethe-define-skolems", "--dump-proofs"]
+
+
+def try_alethe_proof(prove_source: str, solve_args: list[str] | None = None) -> str | None:
     """Ask cvc5 for an Alethe proof of `prove_source` (which must be `unsat`).
     Returns the proof text, or None if cvc5 cannot export Alethe for it (e.g. an
-    induction proof carrying skolems — unsupported by the cvc5 1.3.x exporter)."""
+    induction proof carrying skolems — unsupported by the cvc5 1.3.x exporter).
+
+    `solve_args` are the solving flags the proof is for: `["--quant-ind"]` for an
+    induction goal, `[]` for a plain (non-inductive) equivalence query — the latter
+    is where cvc5 *can* usually export a checkable Alethe certificate."""
     result, detail = _run_cvc5(
         prove_source,
-        ["--quant-ind", "--produce-proofs", "--proof-format-mode=alethe",
-         "--proof-alethe-define-skolems", "--dump-proofs"],
+        (solve_args or ["--quant-ind"]) + _ALETHE_ARGS,
     )
     if result != "unsat":
         return None
@@ -168,6 +175,27 @@ def prove(prove_source: str, want_certificate: bool = True) -> SolveResult:
     res = SolveResult(verdict, detail)
     if verdict == "unsat" and want_certificate:
         proof = try_alethe_proof(prove_source)
+        if proof is not None:
+            res.alethe = proof
+            res.rechecked = recheck_alethe(prove_source, proof)
+    _CACHE[key] = res
+    return res
+
+
+def prove_equiv(prove_source: str, want_certificate: bool = True) -> SolveResult:
+    """Prove a non-inductive equivalence `∀x⃗. L = R` (negated goal → expect `unsat`).
+
+    Plain solving — no `--quant-ind`: two expressions are equal by an unconditional
+    algebraic identity, not by induction. Unlike the induction path, cvc5 can often
+    export a checkable Alethe proof here, so a `proven_equal` may carry a Carcara-
+    re-checked certificate rather than a bare re-runnable problem."""
+    key = _key("equiv", prove_source, str(want_certificate))
+    if key in _CACHE:
+        return _CACHE[key]
+    verdict, detail = _run_cvc5(prove_source, [])
+    res = SolveResult(verdict, detail)
+    if verdict == "unsat" and want_certificate:
+        proof = try_alethe_proof(prove_source, solve_args=[])
         if proof is not None:
             res.alethe = proof
             res.rechecked = recheck_alethe(prove_source, proof)

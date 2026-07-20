@@ -99,6 +99,11 @@
     "leanregate": {
       "outcome": "unknown",
       "score": null
+    },
+    "cvc5regate": {
+      "requires": "cvc5",
+      "outcome": "proven_equal",
+      "certified": true
     }
   }
 }

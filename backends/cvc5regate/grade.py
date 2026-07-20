@@ -4,8 +4,10 @@ import json
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+import cvc5_equiv
 import cvc5_induction
 import cvc5_prover
+import step_check
 
 PROTOCOL = "1.1"
 BACKEND = "cvc5regate"
@@ -62,18 +64,15 @@ def grade(request: dict) -> dict:
         raise RequestError(f"unsupported protocol {request.get('protocol')!r}")
     ex = request.get("exercise") or {}
 
-    if ex.get("mode") == "induction":
+    mode = ex.get("mode", "transformation")
+    if mode == "induction":
         return _grade_induction(ex, request.get("submission") or {})
+    if mode not in ("transformation", "equation"):
+        raise RequestError(f"unsupported mode {mode!r}")
 
-    # cvc5regate is an induction certifier. Equational derivations / endpoint
-    # equivalence are graded by eggregate (e-graph) or leanregate (formal); this
-    # backend is honestly inconclusive on them rather than guessing.
     if "goal" not in ex and "source" not in ex:
         raise RequestError("exercise must have a 'goal' (induction) or 'source'")
-    return _envelope("unknown", None, False,
-                     feedback="cvc5regate certifies inductive goals (mode='induction'); "
-                              "equational derivations are out of scope — use the "
-                              "eggregate or leanregate backend, or route to review.")
+    return _grade_equational(ex, request.get("submission") or {})
 
 
 def _grade_induction(ex: dict, sub: dict) -> dict:
@@ -122,6 +121,159 @@ def _grade_induction(ex: dict, sub: dict) -> dict:
     return _envelope("unknown", None, False, meta=meta,
                      feedback=f"cvc5regate could not grade this induction: {reason}. "
                               "Route to review.")
+
+
+# ---------------------------------------------------------------------------
+# Non-induction grading (mode "transformation" / "equation").
+#
+# Two engines, strongest first: (1) if a `steps` derivation is submitted, certify
+# it symbolically against the transmitted ruleset (each step an instance of a
+# trusted/proven rule — same strict check as the induction obligations, no solver
+# needed); (2) the cvc5 SMT equivalence oracle disproves-first (a numeric
+# counterexample → proven_unequal) then proves `source ≡ target`. The oracle also
+# backstops a valid-but-unfinished or uncertifiable derivation by grading the
+# endpoint the student reached. Outcome/score semantics mirror eggregate.
+# ---------------------------------------------------------------------------
+def _grade_equational(ex: dict, sub: dict) -> dict:
+    mode = ex.get("mode", "transformation")
+    if "source" not in ex:
+        raise RequestError("exercise.source is required")
+    if mode == "transformation" and ex.get("target") is None:
+        raise RequestError("transformation mode requires exercise.target")
+    if sub.get("final") is None and not sub.get("steps"):
+        raise RequestError("submission must have a final expression or steps")
+
+    _validate_node(ex["source"], "exercise.source")
+    target = ex.get("target")
+    if target is not None:
+        _validate_node(target, "exercise.target")
+    source = ex["source"]
+    ac = step_check.ac_ops(ex)
+    partial = bool((ex.get("options") or {}).get("partial_credit", True))
+    meta: dict = {}
+    steps_out = None
+    final = None
+
+    # 1) A submitted derivation: certify it step-by-step. Rules are trusted by default
+    #    (Regate's ruleset warrant); `options.verify_rules` re-proves each with cvc5.
+    #    A transformation derivation needs no solver — a valid chain of trusted rule
+    #    instances reaching the target IS the proof.
+    if sub.get("steps"):
+        proven = cvc5_induction.prove_ruleset(ex)
+        meta["ruleset"] = {rid: {"proven": p.proven, "method": p.method}
+                           for rid, p in proven.items()}
+        rules = step_check.build_rules(ex, {rid for rid, p in proven.items() if p.proven})
+        report = step_check.check_derivation(source, sub["steps"], rules, ac)
+        steps_out = report.steps_out
+        if report.status == "invalid":
+            return _envelope("invalid_derivation", 0, False, steps=steps_out, meta=meta,
+                             feedback=f"step {report.invalid_index} invalid: {report.reason}")
+        if report.status == "valid":
+            final = report.final
+            if _reached(mode, final, target, ac):
+                return _envelope("proven_equal", 100, True, steps=steps_out, meta=meta,
+                                 proof=_derivation_proof(sub["steps"]),
+                                 feedback="Valid derivation; every step is an instance of a "
+                                          "trusted/proven rule and it reaches the target form.")
+            # valid but unfinished → grade the endpoint the student reached.
+        else:
+            # Uncertifiable (unknown/unproven/guarded rule, or a Leibniz step): fall back
+            # to the SMT oracle on the claimed final. Honest — the path is not certified,
+            # but the endpoint's equivalence is an independent, checkable fact.
+            final = sub["steps"][-1].get("result")
+
+    # 2) Endpoint equivalence via the cvc5 oracle.
+    if final is None:
+        final = sub.get("final")
+    if final is None:
+        return _envelope("unknown", None, False, steps=steps_out, meta=meta,
+                         feedback="the derivation could not be certified and no final "
+                                  "expression was supplied; route to review.")
+    _validate_node(final, "submission.final")
+
+    if mode == "equation":
+        return _grade_equation_endpoint(ex, final, ac, steps_out, meta)
+    return _grade_transformation_endpoint(ex, source, final, target, ac, partial, steps_out, meta)
+
+
+def _reached(mode: str, final, target, ac: tuple) -> bool:
+    """Did the endpoint reach the goal? Transformation: equals target (up to AC).
+    Equation: a reflexive `a = a`."""
+    if not isinstance(final, dict):
+        return False
+    if mode == "equation":
+        s = final.get("slots") or {}
+        return (final.get("type") == "eq" and bool(s.get("left") and s.get("right"))
+                and step_check.ac_equal(s["left"][0], s["right"][0], ac))
+    return target is not None and step_check.ac_equal(final, target, ac)
+
+
+def _derivation_proof(steps: list) -> list:
+    """A certified transformation derivation's certificate: the ordered rule instances."""
+    return [{"rule": s.get("rule"), "path": s.get("path", []),
+             "direction": s.get("direction", "forward"), "state": s.get("result")}
+            for s in steps if s.get("kind") != "B"]
+
+
+def _equiv_proof(v: cvc5_equiv.EquivResult) -> list:
+    """The oracle's re-runnable certificate for a proven equivalence."""
+    proof = [{"engine": "cvc5", "method": v.method, "smtlib": v.smtlib, "expect": "unsat"}]
+    if v.alethe:
+        proof[0]["alethe"] = v.alethe
+    return proof
+
+
+def _grade_transformation_endpoint(ex, source, final, target, ac, partial, steps_out, meta) -> dict:
+    if step_check.ac_equal(final, target, ac):
+        return _envelope("proven_equal", 100, True, proof=[], steps=steps_out, meta=meta,
+                         feedback="Reached the target form.")
+    v = cvc5_equiv.decide_equivalence(ex, final, target)
+    meta = {**meta, "equiv": {"method": v.method, "rechecked": v.rechecked}}
+    if v.outcome == "proven_unequal":
+        return _envelope("proven_unequal", 0, True, witness=v.witness, steps=steps_out, meta=meta,
+                         feedback="Not equivalent to the goal (cvc5 found a counterexample).")
+    if v.outcome == "proven_equal":
+        d0 = max(1, cvc5_equiv.distance(source, target))
+        df = cvc5_equiv.distance(final, target)
+        score = 0 if (not partial or df >= d0) else max(1, min(99, int((1 - df / d0) * 100)))
+        return _envelope("proven_equal", score, True, proof=_equiv_proof(v), steps=steps_out,
+                         meta=meta,
+                         feedback="Equivalent to the goal but not yet in the required form; "
+                                  "keep simplifying.")
+    if v.outcome == "equal_no_certificate":
+        return _envelope("equal_no_certificate", None, False, steps=steps_out, meta=meta,
+                         feedback="Believed equivalent but no independently re-checked "
+                                  "certificate is available; route to review.")
+    return _envelope("unknown", None, False, steps=steps_out, meta=meta,
+                     feedback=f"cvc5 could not prove or disprove equivalence to the goal "
+                              f"({v.detail[:200]}); route to review.")
+
+
+def _grade_equation_endpoint(ex, final, ac, steps_out, meta) -> dict:
+    s = final.get("slots") or {}
+    if final.get("type") != "eq" or not (s.get("left") and s.get("right")):
+        return _envelope("invalid_derivation", 0, False, steps=steps_out, meta=meta,
+                         feedback="equation mode expects an equality (eq) expression.")
+    lhs, rhs = s["left"][0], s["right"][0]
+    if step_check.ac_equal(lhs, rhs, ac):
+        return _envelope("proven_equal", 100, True, proof=[], steps=steps_out, meta=meta,
+                         feedback="Both sides are identical — the equation holds.")
+    v = cvc5_equiv.decide_equivalence(ex, lhs, rhs)
+    meta = {**meta, "equiv": {"method": v.method, "rechecked": v.rechecked}}
+    if v.outcome == "proven_unequal":
+        return _envelope("proven_unequal", 0, True, witness=v.witness, steps=steps_out, meta=meta,
+                         feedback="The two sides are not equal (cvc5 found a counterexample).")
+    if v.outcome == "proven_equal":
+        return _envelope("proven_equal", 100, True, proof=_equiv_proof(v), steps=steps_out,
+                         meta=meta,
+                         feedback="The two sides are equivalent — the equation holds.")
+    if v.outcome == "equal_no_certificate":
+        return _envelope("equal_no_certificate", None, False, steps=steps_out, meta=meta,
+                         feedback="Believed to hold but no independently re-checked "
+                                  "certificate is available; route to review.")
+    return _envelope("unknown", None, False, steps=steps_out, meta=meta,
+                     feedback=f"cvc5 could not prove or disprove the equation "
+                              f"({v.detail[:200]}); route to review.")
 
 
 # ---- transports (mirror leanregate's grade.py / eggregate's server.py) -----

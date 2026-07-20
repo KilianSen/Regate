@@ -4,10 +4,11 @@ A language-agnostic JSON contract for grading a student's equational-reasoning
 submission. Any backend that implements it is a drop-in grader for a host learning
 platform. Four backends implement it today — **eggregate** (Python / e-graph),
 **leanregate** (Lean / formal), **coqregate** (Rocq/Coq, induction only), and
-**cvc5regate** (cvc5 SMT, induction only) — so they deploy as interchangeable OCI
-containers, selected per exercise. The two induction certifiers answer
-non-induction modes with `unknown`; interchangeability therefore holds within a
-mode.
+**cvc5regate** (cvc5 SMT — a specialist induction certifier that *also* grades
+`transformation`/`equation` via its SMT equivalence oracle) — so they deploy as
+interchangeable OCI containers, selected per exercise. Only coqregate is
+induction-only, declining non-induction modes with `unknown`; interchangeability
+therefore holds within a mode.
 
 ## Transports
 
@@ -422,7 +423,8 @@ on where it fails:
 Both are honest declines: the host routes to review either way, and neither is a wrong grade. What is
 forbidden is a **wrong grade** or an uncaught crash (HTTP 500 / exit 1). This is distinct from, but
 lands in the same place as, **mode-decline** — a backend that understands the request but has no kernel
-for its mode (an induction certifier asked to grade a `transformation`) always returns `unknown`.
+for its mode (coqregate asked to grade a `transformation`) always returns `unknown`. (cvc5regate is no
+longer an example of this: it grades `transformation`/`equation` via its SMT oracle as well as `induction`.)
 
 A host selecting a backend, or fanning out across several, treats a decline (400 *or* `unknown`) as a
 signal to route elsewhere — never as a submission error surfaced to the student. A backend **may**

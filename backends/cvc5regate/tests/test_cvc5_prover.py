@@ -497,11 +497,13 @@ def test_ac_matching_commutative():
     assert rep.status == "certified" and sc.is_reflexive(rep.final, ("add", "mul"))
 
 
-def test_grade_non_induction_is_unknown():
+def test_grade_non_induction_reached_target_form():
+    # A structurally-identical final reaches the target form with no solver needed.
     resp = grade.grade({"protocol": "1.0",
                         "exercise": {"mode": "transformation", "source": num(1), "target": num(1)},
                         "submission": {"final": num(1)}})
-    assert resp["outcome"] == "unknown" and resp["score"] is None
+    assert resp["outcome"] == "proven_equal" and resp["score"] == 100
+    assert resp["certified"] is True and resp["proof"] == []
 
 
 def test_grade_malformed_raises():
