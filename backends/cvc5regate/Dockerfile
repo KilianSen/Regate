@@ -29,8 +29,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && cvc5 --version
 
 WORKDIR /app
+# Every runtime module grade.py imports must be listed here — a missing one only surfaces as an
+# ImportError at container start, which the source-level tests and the conformance suite cannot catch.
 COPY backends/cvc5regate/grade.py backends/cvc5regate/cvc5_induction.py \
-     backends/cvc5regate/cvc5_prover.py backends/cvc5regate/step_check.py ./
+     backends/cvc5regate/cvc5_prover.py backends/cvc5regate/cvc5_equiv.py \
+     backends/cvc5regate/step_check.py ./
 COPY GRADING_PROTOCOL.md ./
 
 EXPOSE 8000
