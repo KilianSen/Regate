@@ -5,11 +5,37 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 from dataclasses import dataclass
 
-# The cvc5 binary. Override with CVC5REGATE_CVC5; else found on PATH.
-CVC5 = os.environ.get("CVC5REGATE_CVC5") or shutil.which("cvc5") or "cvc5"
+
+def _find_cvc5() -> str:
+    """Locate the cvc5 binary: CVC5REGATE_CVC5, then PATH, then this
+    interpreter's own environment.
+
+    The `cvc5` wheel installs a real binary into <prefix>/bin, which is on PATH
+    only while the virtualenv is activated. Without this fallback, running under
+    an unactivated venv (a service, a bare `.venv/bin/python`) leaves cvc5
+    unfindable and every goal degrades silently to `unknown`.
+    """
+    explicit = os.environ.get("CVC5REGATE_CVC5")
+    if explicit:
+        return explicit
+    found = shutil.which("cvc5")
+    if found:
+        return found
+    for base in (sys.prefix, sys.base_prefix):
+        for sub in ("bin", "Scripts"):
+            for name in ("cvc5", "cvc5.exe"):
+                cand = os.path.join(base, sub, name)
+                if os.path.isfile(cand) and os.access(cand, os.X_OK):
+                    return cand
+    return "cvc5"
+
+
+# The cvc5 binary. Override with CVC5REGATE_CVC5; else PATH, else this venv.
+CVC5 = _find_cvc5()
 # The Carcara Alethe-proof checker (optional). Override with CVC5REGATE_CARCARA.
 CARCARA = os.environ.get("CVC5REGATE_CARCARA") or shutil.which("carcara") or ""
 # Per-call wall-clock budget (seconds). cvc5's induction search is unbounded, so a
