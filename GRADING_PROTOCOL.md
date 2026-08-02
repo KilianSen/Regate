@@ -53,10 +53,31 @@ list** of children rather than a fixed set of named single-child slots:
 ```
 
 `apply` is **n-ary and named** (`value` is the function name), **not** curried and **not** an opaque
-symbol. It carries no meaning of its own: the function is defined by recursive `definitions` rules in
-the request (e.g. `fact_aux(x, 0) → x`, `fact_aux(x, S n) → fact_aux(x·(S n), n)`), which a backend
-compiles to a native recursive definition. A backend that does not implement `apply` rejects the
-request per [Unimplemented vocabulary](#unimplemented-vocabulary).
+symbol. It carries no meaning of its own: the function is defined by `definitions` rules in the
+request, which a backend compiles to a native definition. `value` must be a plain identifier — it is
+interpolated into emitted kernel source, so a name carrying syntax is rejected.
+
+Two definition shapes are accepted:
+
+- **Recursive** — one rule matching the induction datatype's base constructor and one matching its
+  step constructor, both recursing on the *same* argument position. That position is whichever
+  argument is constructor-matched, and it need **not** be the last: `fact_aux(x, 0) → x`,
+  `fact_aux(x, S n) → fact_aux(x·(S n), n)` recurses on argument 1, `sum(nil, a) → a`,
+  `sum(cons h t, a) → sum(t, a+h)` on argument 0. Compiles to a native recursive definition.
+- **Non-recursive** — a single equation whose parameters are distinct pattern variables and whose body
+  does not mention the function itself: `avg(a, b) → (a+b)/2`. Compiles to a plain (non-recursive)
+  definition, which is a definitional extension rather than an axiom.
+
+**The non-recursive shape is how a host adds an ordinary operator without a new node type.** A new
+binary operator needs no backend release: it travels as an `apply` node plus its defining equation,
+and a derivation citing that equation by id is graded by the symbolic step checker with no solver at
+all (fixture `33-apply-plain-binary-operator`).
+
+Support is uneven and a host should expect it: every backend parses `apply` and compiles both shapes
+for ℕ, but only cvc5regate implements `exercise.datatype` (lists/trees) and the generalized IH.
+leanregate, coqregate and eggregate decline those per
+[Unimplemented vocabulary](#unimplemented-vocabulary); eggregate additionally declines arities above
+four. A decline is always `unknown`, never a grade.
 
 ## GradeRequest
 
@@ -236,8 +257,16 @@ accumulators**: `∀x⃗. P(x⃗, n)`, not just `P(x⃗, n)` at the goal's own `
 step may therefore instantiate the IH at a **shifted** accumulator (the inductive
 step of `fact_aux x (S n)` unfolds to `fact_aux (x·(S n)) n`, then applies the IH at
 `x·(S n)`). The step's `equation` must be that concrete instance `(P.lhs σ, P.rhs σ)`;
-the backend recovers `σ` by matching the IH's LHS against the rewritten subterm and
-re-checks the instance. This is sound only because the certifying backend proves the
+the backend recovers `σ` by matching a side of the IH against the rewritten subterm and
+re-checks the instance.
+
+A kind-`B` step may apply the IH in **either direction** — forward rewrites `P.lhs·σ` to
+`P.rhs·σ`, reverse folds `P.rhs·σ` back into `P.lhs·σ`. Both are instances of the same
+co-quantified universal the certifying backend proves, so the reverse adds no proving
+strength; it is what lets a derivation *introduce* a recursive call (folding
+`nodes l + nodes r` into `aux r (nodes l)`), which accumulator proofs over lists and trees
+need. Because `equation` is always `(pre-rewrite, post-rewrite)`, it names the direction
+taken and the backend re-checks the instance in that orientation. This is sound only because the certifying backend proves the
 **co-quantified** statement `∀x⃗ n. P(x⃗, n)` — the same universal the IH claims (a
 backend that induction-certifies the goal must quantify the induction variable such
 that induction is taken over it, not over an accumulator). With no accumulators this
@@ -414,11 +443,20 @@ on where it fails:
 
 - **Cannot parse it → malformed.** A backend whose MathNode reader has no representation for the node
   rejects the request: HTTP 400 / CLI exit 2 with `{"error": "..."}`, exactly as for a syntactically
-  broken MathNode. (eggregate does this for `apply` — its fixed-arity term model cannot hold an n-ary
-  `args` slot.)
+  broken MathNode. (Every backend does this for an unknown node `type`, and eggregate for an `apply`
+  whose `value` is not a function name.)
 - **Parses it but cannot grade it → `unknown`.** A backend that accepts the generic node shape but
-  cannot translate it to its kernel returns a valid `GradeResponse` with `outcome: "unknown"`,
-  `score: null`. (leanregate and coqregate do this for `apply`.)
+  cannot translate it to its kernel — or can translate it but cannot discharge the obligation —
+  returns a valid `GradeResponse` with `outcome: "unknown"`, `score: null`. (leanregate, coqregate and
+  eggregate all do this for a non-ℕ `exercise.datatype` and for a generalized IH.)
+
+> **Do not rely on a parse-level reject to keep a backend honest.** Teaching a backend to *parse* new
+> vocabulary is not the same as teaching it to *grade* that vocabulary, and the 400 it used to return
+> may be the only thing standing between a half-implemented capability and a wrong grade. When
+> eggregate gained `apply`, three previously-conformant fixtures began reaching its ℕ-hardcoded
+> obligation generator and returned `invalid_derivation`, score 0, on *valid* derivations — the exact
+> false negative this section exists to prevent. Whenever a backend learns to parse something new, the
+> matching declines must land in the same change.
 
 Both are honest declines: the host routes to review either way, and neither is a wrong grade. What is
 forbidden is a **wrong grade** or an uncaught crash (HTTP 500 / exit 1). This is distinct from, but
@@ -446,4 +484,10 @@ major version only), and a host may send either.
   (`exercise.datatype` — lists and trees), and the
   [Unimplemented vocabulary](#unimplemented-vocabulary) rule. All additive; a `1.0` request grades
   identically.
+  Later in 1.1, `apply` gained a **non-recursive** definition shape (a single equation → a plain
+  definition) and became universally supported: all four backends now parse and compile it for ℕ,
+  making an `apply` node plus its defining equation the way a host adds a new operator without a new
+  MathNode type or a backend release. Additive — no `1.1` request changes meaning — but three
+  backends' *decline surface* moved from a 400 to `unknown`, so a host that branched on the error is
+  affected. Datatype/generalized-IH support remains cvc5-only.
 - **1.0** — initial contract.

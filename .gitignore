@@ -19,3 +19,5 @@ backends/leanregate/Regate/        # runtime scratch: lean_prover/check_inductio
 # Eggregate experiment artifacts (the patched 3.15t wheel/source)
 vendor/
 Artemis/
+CLAUDE.md
+FPV_INDUCTION_PLAN.md

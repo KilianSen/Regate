@@ -22,7 +22,7 @@ from .catalogue import CATALOGUE
 from .rule import Rule
 from .conditions import SideCondition
 from .model import MathNode
-from .semantics import evaluate, free_vars
+from .semantics import evaluate, free_vars, is_evaluable
 
 _POOL = [Fraction(n) for n in (-3, -2, -1, 0, 1, 2, 3, 5, 7)]
 
@@ -61,9 +61,18 @@ class RuleAudit:
     sound: bool
     counterexample: dict[str, Fraction] | None = None   # guard held but sides differ
     guard_necessary: bool | None = None                  # a violation that breaks equality exists
+    fuzzable: bool = True                                # False -> NOT checked, not "checked ok"
 
 
 def audit_rule(rule: Rule, trials: int = 500, seed: int = 0) -> RuleAudit:
+    # A rule mentioning vocabulary outside the exact-ℚ fragment -- an `apply`
+    # (protocol 1.1) function application, whose meaning lives in the request's
+    # `definitions` -- cannot be fuzzed at all. Report that honestly instead of
+    # crashing on `evaluate` (which would be a 500) or, worse, silently passing it
+    # as sound: `sound=True, fuzzable=False` means "no counterexample was looked
+    # for", and the service refuses to treat it as a verification.
+    if not (is_evaluable(rule.lhs) and is_evaluable(rule.rhs)):
+        return RuleAudit(rule.id, sound=True, fuzzable=False)
     rng = random.Random(seed)
     wilds = sorted(free_vars(rule.lhs) | free_vars(rule.rhs))
     guard_violation_breaks = False
@@ -106,6 +115,8 @@ def main(argv: list[str] | None = None) -> int:
         if not a.sound:
             wit = ", ".join(f"{k}={v}" for k, v in a.counterexample.items())
             print(f"  UNSOUND   {a.rule_id:<24} counterexample: {wit}")
+        elif not a.fuzzable:
+            print(f"  SKIPPED   {a.rule_id:<24} outside the ℚ fragment (not fuzzed)")
         else:
             note = ""
             if a.guard_necessary is True:

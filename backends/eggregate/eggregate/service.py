@@ -24,6 +24,7 @@ from .model import (
     MathNode, ac_normalize, distance, from_json, num, pretty, subst_var, succ, to_json, var,
 )
 from .hints import greedy_hints, shortest_path
+from .matching import match
 from .reference import guided_hint, progress, reference_from_states
 from .robust import (
     EQUAL_NO_CERTIFICATE, PROVEN_EQUAL, PROVEN_UNEQUAL, UNKNOWN,
@@ -94,6 +95,21 @@ def _resolve_rules(ex: dict):
     return rules, {r.id: r for r in rules}, custom
 
 
+def _resolve_definitions(ex: dict):
+    """Parse ``exercise.definitions`` -- the recursive equations that give an
+    ``apply`` function its meaning (protocol 1.1, §`apply`).
+
+    They are ordinary rewrite rules to this backend (`f(a, 0) -> a`), so they join
+    the derivation's citable palette and the equivalence oracle. They are
+    **definitional and always trusted**: never fuzzed, whatever ``verify_rules``
+    says (CLAUDE.md, "Recursive definitions are definitional and always trusted").
+    """
+    try:
+        return ruleset_from_json(ex.get("definitions") or [])
+    except (ValueError, KeyError, TypeError) as e:
+        raise RequestError(f"invalid definitions: {e}")
+
+
 def _step_to_json(s) -> dict:
     return {
         "rule": s.rule_id,
@@ -157,6 +173,16 @@ def _audit_if_requested(rules, opts, custom: bool) -> None:
         if not a.sound:
             wit = ", ".join(f"{k}={v}" for k, v in a.counterexample.items())
             raise RequestError(f"unsound rule {a.rule_id!r}: counterexample {wit}")
+        if not a.fuzzable:
+            # The caller asked us to re-establish the warrant and we cannot: the
+            # rule mentions an `apply` (or other non-ℚ) term the fuzzer cannot
+            # evaluate. Declining is honest; reporting it as verified would not be.
+            # (Definitions never reach here -- they are trusted by construction.)
+            raise RequestError(
+                f"cannot verify rule {a.rule_id!r}: it uses vocabulary outside the "
+                f"rational fragment this backend fuzzes (e.g. an 'apply' function "
+                f"application). Drop options.verify_rules, or move it to "
+                f"exercise.definitions.")
 
 
 def _parse_assumptions(ex) -> frozenset:
@@ -235,6 +261,58 @@ def _replay_obligation(source, steps_in, by_id, hyps, assumptions=frozenset()):
     return ("closed" if closed else "open"), steps_out, final
 
 
+def _decline(feedback: str, meta: dict | None = None) -> dict:
+    """A well-formed request whose vocabulary this backend parses but cannot grade.
+
+    The protocol's second conformant decline (GRADING_PROTOCOL.md, "Unimplemented
+    vocabulary"): a valid GradeResponse with ``outcome: unknown`` / ``score: null``,
+    never an error and never a grade. Used where a *wrong* grade would otherwise
+    be the alternative.
+    """
+    return {"outcome": UNKNOWN, "score": None, "certified": False, "proof": None,
+            "witness": None, "steps": None, "hint": None, "feedback": feedback,
+            "meta": meta or {}}
+
+
+def _generalized_ih_pattern(goal: MathNode, indvar: str) -> MathNode:
+    """The goal with every variable *except* the induction variable turned into a
+    wildcard -- i.e. the accumulator-universal (generalized) inductive hypothesis
+    ``∀x. P(x, n)`` as a match pattern (protocol 1.1)."""
+    if goal.op == "variable" and goal.value != indvar:
+        return MathNode("wild", f"__gih__{goal.value}")
+    if not goal.kids:
+        return goal
+    return MathNode(goal.op, goal.value,
+                    tuple(_generalized_ih_pattern(k, indvar) for k in goal.kids))
+
+
+def _uses_generalized_ih(steps, goal: MathNode, indvar: str, exact: frozenset) -> bool:
+    """Does a Type-B step cite the IH at a *shifted* argument (``fact_aux (x·S n) n``
+    for the IH at ``x``)? That is the generalized IH, which is sound only because
+    the non-induction variables are co-quantified -- a leap this backend does not
+    model. Detecting it lets us decline instead of scoring the (valid) derivation 0.
+    """
+    pat = _generalized_ih_pattern(goal, indvar)
+    pl, pr = pat.slot("left"), pat.slot("right")
+    for s in steps:
+        if not isinstance(s, dict) or s.get("kind") != "B":
+            continue
+        eq = s.get("equation")
+        if not isinstance(eq, (list, tuple)) or len(eq) != 2:
+            continue
+        try:
+            lhs, rhs = from_json(eq[0]), from_json(eq[1])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if (lhs, rhs) in exact:                     # the plain IH: already in scope
+            continue
+        for a, b in ((lhs, rhs), (rhs, lhs)):       # equality is symmetric
+            env = match(pl, a)
+            if env is not None and match(pr, b, env) is not None:
+                return True
+    return False
+
+
 def _grade_induction(ex, sub) -> dict:
     """Grade a proof by induction over ℕ on ``exercise.inductionVar``.
 
@@ -256,11 +334,20 @@ def _grade_induction(ex, sub) -> dict:
     if not name:
         raise RequestError("induction mode requires exercise.inductionVar")
 
+    # Datatype induction (protocol 1.1, `exercise.datatype`) is *not* implemented:
+    # the obligations below are hardcoded to ℕ (base `0`, step `S n`). Generating
+    # `nil`/`cons` obligations instead would take a constructor-aware schema this
+    # backend does not have, so decline — grading a list derivation against ℕ
+    # obligations would report a valid proof as `invalid_derivation`.
+    dtype = ex.get("datatype")
+    if dtype is not None and str((dtype or {}).get("name", "")) != "Nat":
+        return _decline(
+            f"datatype induction over {(dtype or {}).get('name')!r} is not implemented "
+            f"by this backend (ℕ only); route to review or to an induction certifier.",
+            {"induction": {"var": name, "declined": "datatype"}})
+
     rules, _, custom = _resolve_rules(ex)
-    try:
-        defs = ruleset_from_json(ex.get("definitions") or [])
-    except (ValueError, KeyError, TypeError) as e:
-        raise RequestError(f"invalid definitions: {e}")
+    defs = _resolve_definitions(ex)
     # Same trust boundary as the equational path: a transmitted ruleset is taken on
     # the caller's warrant unless the request asks us to re-establish it. Recursive
     # `definitions` are definitional and are never fuzzed.
@@ -284,6 +371,16 @@ def _grade_induction(ex, sub) -> dict:
     psucc = subst_var(goal, name, succ(var(name)))
     ih = frozenset({(goal.slot("left"), goal.slot("right")),
                     (goal.slot("right"), goal.slot("left"))})
+    # A step citing the IH at a shifted accumulator is using the *generalized*
+    # (accumulator-universal) IH. It is sound — but only under a co-quantification
+    # this backend does not model, so its exact-match IH scope would call a valid
+    # derivation invalid. Decline instead of issuing that wrong grade.
+    if _uses_generalized_ih(step_steps, goal, name, ih):
+        return _decline(
+            "the step case uses a generalized (accumulator-universal) inductive "
+            "hypothesis; this backend models only the exact IH P(n) and cannot "
+            "certify the generalization. Route to review or to an induction certifier.",
+            {"induction": {"var": name, "base": b_status, "declined": "generalized_ih"}})
     s_status, s_out, _ = _replay_obligation(psucc, step_steps, by_id, ih, assumptions)
     if s_status == "invalid":
         return {"outcome": "invalid_derivation", "score": 0, "certified": False,
@@ -329,7 +426,17 @@ def grade(request: dict) -> dict:
     rules, by_id, custom = _resolve_rules(ex)
     opts = ex.get("options") or {}
 
+    # Audit the *ruleset* only, before folding in the definitions: `definitions`
+    # are trusted by declaration and are never fuzzed.
     _audit_if_requested(rules, opts, custom)
+
+    # Recursive `definitions` give `apply` functions their meaning. They are
+    # citable in a derivation (by id) and available to the equivalence oracle,
+    # exactly as in induction mode.
+    defs = _resolve_definitions(ex)
+    if defs:
+        rules = list(rules) + defs
+        by_id = {**by_id, **{d.id: d for d in defs}}
 
     if "source" not in ex:
         raise RequestError("exercise.source is required")

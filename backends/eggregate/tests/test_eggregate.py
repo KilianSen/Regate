@@ -558,6 +558,222 @@ def test_verify_rules_rejects_unsound_inline_rule():
         "submission": {"final": to_json(X)}}) is None
 
 
+# -- `apply`: n-ary named function application (protocol 1.1) ---------------
+def _wild(n):
+    from eggregate.model import MathNode
+    return MathNode("wild", n)
+
+
+# max(a, b) = max(b, a) as a *definition* (data, not backend code): this is the
+# whole point of `apply` -- a host adds a binary operator by sending a node plus
+# its definitions, with no backend change.
+def _max_comm_def():
+    from eggregate.model import apply as ap, to_json
+    return {"id": "max_comm", "owner": "max",
+            "lhs": to_json(ap("max", _wild("a"), _wild("b"))),
+            "rhs": to_json(ap("max", _wild("b"), _wild("a"))),
+            "bidirectional": True, "conditions": []}
+
+
+def test_apply_json_round_trips_and_prints():
+    from eggregate.model import apply as ap, to_json, from_json as fj, pretty as pp
+    n = ap("fact_aux", var("x"), var("n"))
+    j = to_json(n)
+    assert j == {"type": "apply", "value": "fact_aux", "slots": {"args": [
+        {"type": "variable", "value": "x"}, {"type": "variable", "value": "n"}]}}
+    assert fj(j) == n
+    assert pp(n) == "fact_aux(x, n)"
+    # nullary (a constructor like `nil`) and the flat-child path encoding
+    assert fj(to_json(ap("nil"))) == ap("nil")
+    assert n.at((1,)) == var("n")
+
+
+def test_apply_name_and_arity_are_part_of_identity():
+    from eggregate.model import apply as ap
+    from eggregate.matching import match
+    assert ap("f", X) != ap("g", X)
+    assert match(ap("f", _wild("a")), ap("f", X)) == {"a": X}
+    assert match(ap("f", _wild("a")), ap("g", X)) is None          # name differs
+    assert match(ap("f", _wild("a")), ap("f", X, X)) is None       # arity differs
+
+
+def test_apply_malformed_is_a_400_not_a_500():
+    from eggregate.model import to_json
+    # missing function name, and a non-list args slot
+    for bad in ({"type": "apply", "slots": {"args": []}},
+                {"type": "apply", "value": "f", "slots": {"args": {"a": 1}}},
+                {"type": "apply", "value": "f"}):
+        msg = _err({"protocol": "1.1", "exercise": {
+            "mode": "transformation", "source": bad, "target": to_json(X),
+            "ruleset": []}, "submission": {"final": to_json(X)}})
+        assert msg is not None and "exercise.source" in msg
+
+
+def test_apply_derivation_is_step_validated():
+    from eggregate.model import apply as ap, to_json
+    src, tgt = to_json(ap("max", X, var("y"))), to_json(ap("max", var("y"), X))
+    r = _svc({"protocol": "1.1", "exercise": {
+        "mode": "transformation", "source": src, "target": tgt,
+        "ruleset": [], "definitions": [_max_comm_def()]},
+        "submission": {"steps": [{"rule": "max_comm", "path": [], "kind": "A",
+                                  "result": tgt}]}})
+    assert r["outcome"] == "proven_equal" and r["score"] == 100 and r["certified"]
+    assert r["proof"] == [{"rule": "max_comm", "path": [], "direction": "forward",
+                           "state": tgt}]
+
+
+def test_apply_bogus_derivation_step_is_invalid_not_a_crash():
+    from eggregate.model import apply as ap, to_json
+    src = to_json(ap("max", X, var("y")))
+    r = _svc({"protocol": "1.1", "exercise": {
+        "mode": "transformation", "source": src, "target": to_json(X),
+        "ruleset": [], "definitions": [_max_comm_def()]},
+        "submission": {"steps": [{"rule": "max_comm", "path": [], "kind": "A",
+                                  "result": to_json(X)}]}})   # fabricated result
+    assert r["outcome"] == "invalid_derivation" and r["score"] == 0
+
+
+def test_apply_endpoint_equivalence_reaches_the_oracle():
+    # An `apply` term now compiles to egglog (one constructor per arity, the name
+    # carried as a String), so endpoint grading works rather than 400-ing.
+    from eggregate.model import apply as ap, to_json
+    src = to_json(ap("max", add(X, num(0)), var("y")))
+    tgt = to_json(ap("max", X, var("y")))
+    r = _svc({"protocol": "1.1", "exercise": {
+        "mode": "transformation", "source": src, "target": tgt,
+        "rules": ["add_zero_right"]}, "submission": {"final": src}})
+    assert r["outcome"] == "proven_equal" and r["certified"] and r["proof"] is not None
+
+
+def test_apply_unfoldable_definition_is_proven_equal():
+    from eggregate.model import apply as ap, to_json
+    # double(a) -> a + a, cited by definition id in a derivation
+    d = {"id": "double_def", "owner": "double",
+         "lhs": to_json(ap("double", _wild("a"))),
+         "rhs": to_json(add(_wild("a"), _wild("a"))),
+         "bidirectional": True, "conditions": []}
+    r = _svc({"protocol": "1.1", "exercise": {
+        "mode": "transformation", "source": to_json(ap("double", X)),
+        "target": to_json(add(X, X)), "ruleset": [], "definitions": [d]},
+        "submission": {"final": to_json(ap("double", X))}})
+    assert r["outcome"] == "proven_equal" and r["certified"]
+
+
+def test_apply_never_fabricates_a_counterexample():
+    """THE soundness invariant: the ℚ evaluator has no value for an uninterpreted
+    `apply`, so it must answer "cannot decide", never `proven_unequal`."""
+    from eggregate.model import apply as ap, to_json
+    from eggregate.semantics import evaluate, find_counterexample, is_evaluable
+    from fractions import Fraction
+    f = ap("f", X)
+    assert not is_evaluable(f) and not is_evaluable(add(f, num(1)))
+    try:
+        evaluate(f, {"x": Fraction(1)})
+        raise AssertionError("evaluate must refuse an uninterpreted apply")
+    except ValueError:
+        pass
+    # f(x) vs f(x)+1 are genuinely unequal, but we cannot witness it -> None.
+    assert find_counterexample(f, add(f, num(1)), 200) is None
+    r = _svc({"protocol": "1.1", "exercise": {
+        "mode": "transformation", "source": to_json(f),
+        "target": to_json(add(f, num(1))), "ruleset": []},
+        "submission": {"final": to_json(f)}})
+    assert r["outcome"] == "unknown" and r["score"] is None and r["witness"] is None
+
+
+def test_apply_rule_cannot_be_fuzz_verified():
+    # verify_rules asks us to re-establish the warrant; the ℚ fuzzer cannot even
+    # evaluate an `apply`, so we decline (400) rather than report it as verified.
+    from eggregate.model import to_json
+    from eggregate.audit import audit_rule
+    from eggregate.rule import rule_from_json
+    d = _max_comm_def()
+    a = audit_rule(rule_from_json(d))
+    assert a.sound and a.fuzzable is False       # "not checked", not "checked ok"
+    msg = _err({"protocol": "1.1", "exercise": {
+        "mode": "transformation", "source": to_json(X), "target": to_json(X),
+        "ruleset": [d], "options": {"verify_rules": True}},
+        "submission": {"final": to_json(X)}})
+    assert msg is not None and "max_comm" in msg
+    # ...but as a *definition* it is trusted by declaration, so no error.
+    assert _err({"protocol": "1.1", "exercise": {
+        "mode": "transformation", "source": to_json(X), "target": to_json(X),
+        "ruleset": [], "definitions": [d], "options": {"verify_rules": True}},
+        "submission": {"final": to_json(X)}}) is None
+
+
+def test_apply_over_max_arity_declines_instead_of_crashing():
+    from eggregate.model import apply as ap, to_json
+    from eggregate.backend import MAX_APPLY_ARITY, equivalent as eqv
+    wide = ap("wide", *([X] * (MAX_APPLY_ARITY + 2)))
+    assert eqv(wide, X) is False                       # oracle declines, no raise
+    r = _svc({"protocol": "1.1", "exercise": {
+        "mode": "transformation", "source": to_json(wide), "target": to_json(X),
+        "ruleset": []}, "submission": {"final": to_json(wide)}})
+    assert r["outcome"] == "unknown" and r["score"] is None
+
+
+def test_datatype_induction_declines_instead_of_grading_zero():
+    # Now that `apply` parses, a list/tree induction reaches the ℕ-only obligation
+    # generator. Grading it there would report a VALID derivation as
+    # `invalid_derivation` — so decline (unknown), per the protocol's second
+    # conformant decline.
+    from eggregate.model import apply as ap, to_json, eq as EQ
+    goal = EQ(ap("len", var("l")), ap("len", var("l")))
+    r = _svc({"protocol": "1.1", "exercise": {
+        "mode": "induction", "goal": to_json(goal), "inductionVar": "l",
+        "datatype": {"name": "Lst", "constructors": [
+            {"name": "nil", "fields": []},
+            {"name": "cons", "fields": [{"name": "h", "sort": "int"},
+                                        {"name": "t", "sort": "Lst"}]}]},
+        "ruleset": []},
+        "submission": {"base": {"steps": []}, "step": {"steps": []}}})
+    assert r["outcome"] == "unknown" and r["score"] is None and not r["certified"]
+    assert "Lst" in r["feedback"]
+
+
+def test_generalized_ih_declines_instead_of_grading_zero():
+    # IH `f(x, n) = g(x, n)` cited at the SHIFTED accumulator `x·S(n)`: sound under
+    # the accumulator-universal IH, which this backend does not model. It must not
+    # be scored 0 as an out-of-scope substitution.
+    from eggregate.model import apply as ap, to_json, succ as S, eq as EQ
+    goal = EQ(ap("f", X, var("n")), ap("g", X, var("n")))
+    shifted = mul(X, S(var("n")))
+    b_step = {"kind": "B", "path": [],
+              "equation": [to_json(ap("f", shifted, var("n"))),
+                           to_json(ap("g", shifted, var("n")))]}
+    r = _svc({"protocol": "1.1", "exercise": {
+        "mode": "induction", "goal": to_json(goal), "inductionVar": "n",
+        "ruleset": []},
+        "submission": {"base": {"steps": []}, "step": {"steps": [b_step]}}})
+    assert r["outcome"] == "unknown" and r["score"] is None
+    assert r["meta"]["induction"]["declined"] == "generalized_ih"
+    # The circular use of the IH at `S n` is NOT a generalized instance and stays
+    # an invalid derivation (fixture 20's guarantee).
+    circ = {"kind": "B", "path": [],
+            "equation": [to_json(ap("f", X, S(var("n")))),
+                         to_json(ap("g", X, S(var("n"))))]}
+    r2 = _svc({"protocol": "1.1", "exercise": {
+        "mode": "induction", "goal": to_json(goal), "inductionVar": "n",
+        "ruleset": []},
+        "submission": {"base": {"steps": []}, "step": {"steps": [circ]}}})
+    assert r2["outcome"] == "invalid_derivation" and r2["score"] == 0
+
+
+def test_apply_in_induction_definitions_still_grades():
+    from eggregate.model import apply as ap, to_json, succ as S, eq as EQ
+    # sum(0) = 0 ; the base obligation closes by the definition rule alone.
+    goal = EQ(ap("sum", var("n")), ap("sum", var("n")))
+    d = {"id": "sum_refl", "owner": "sum",
+         "lhs": to_json(ap("sum", _wild("a"))), "rhs": to_json(ap("sum", _wild("a"))),
+         "bidirectional": False, "conditions": []}
+    r = _svc({"protocol": "1.1", "exercise": {
+        "mode": "induction", "goal": to_json(goal), "inductionVar": "n",
+        "ruleset": [], "definitions": [d]},
+        "submission": {"base": {"steps": []}, "step": {"steps": []}}})
+    assert r["outcome"] == "equal_no_certificate" and r["score"] is None
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in fns:

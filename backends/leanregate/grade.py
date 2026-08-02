@@ -101,15 +101,14 @@ def grade(request: dict) -> dict:
         if not ex.get("goal"):
             raise RequestError("induction mode requires exercise.goal")
         _validate_node(ex["goal"], "exercise.goal")
-        # Decline vocabulary Leanregate cannot translate to its kernel (e.g. the
-        # `apply` node / datatype induction — cvc5regate capabilities) BEFORE the
-        # symbolic step-check, which would otherwise run on an untranslatable goal and
-        # report a misleading `invalid_derivation`. Unimplemented ⇒ `unknown`.
-        goal = ex["goal"]
+        # Decline vocabulary Leanregate cannot translate to its kernel (datatype
+        # induction over lists/trees — a cvc5regate capability) BEFORE the symbolic
+        # step-check, which would otherwise run on an untranslatable goal and report a
+        # misleading `invalid_derivation`. Unimplemented ⇒ `unknown`. The `apply` node
+        # (n-ary named function application) IS implemented, so a goal whose functions
+        # are properly defined by the transmitted `definitions` passes this guard.
         try:
-            lean_induction._infer(goal, "Q", {})
-            lean_induction._term(goal["slots"]["left"][0], "Q")
-            lean_induction._term(goal["slots"]["right"][0], "Q")
+            lean_induction.check_translatable(ex)
         except (lean_induction.InductionError, KeyError, IndexError, TypeError) as e:
             meta["induction"] = {"var": ex.get("inductionVar"), "submission": "untranslatable",
                                  "reason": str(e)}

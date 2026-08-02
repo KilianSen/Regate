@@ -8,7 +8,7 @@ mathematical exercises", Section 4.5 / 5.7 and Appendix B); Artemis is the
 reference adopter, not a dependency.
 """
 from .model import (
-    MathNode, add, ac_normalize, distance, eq, frac, from_json, mul, neg, num,
+    MathNode, add, ac_normalize, apply, distance, eq, frac, from_json, mul, neg, num,
     pretty, sub, to_json, var,
 )
 from .catalogue import CATALOGUE, rules
@@ -36,7 +36,7 @@ from .validate import (
 )
 
 __all__ = [
-    "MathNode", "add", "sub", "mul", "frac", "neg", "eq", "num", "var",
+    "MathNode", "add", "sub", "mul", "frac", "neg", "eq", "num", "var", "apply",
     "pretty", "distance", "ac_normalize", "to_json", "from_json",
     "CATALOGUE", "Rule", "rules",
     "Assumption", "SideCondition", "discharge", "match", "instantiate",

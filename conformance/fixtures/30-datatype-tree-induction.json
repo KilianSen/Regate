@@ -1,6 +1,6 @@
 {
   "name": "30-datatype-tree-induction",
-  "description": "Datatype induction over BINARY TREES with TWO inductive hypotheses (since 1.1): aux t a = a + nodes t, induction on the tree t via exercise.datatype (empty/node, node having two recursive fields l and r). The step unfolds aux (node l v r) a to aux r (aux l (a+1)), then applies IH P(l) at accumulator a+1 and IH P(r) at (a+1)+nodes l \u2014 check_case tries each kind-B step against BOTH server-built IHs. cvc5regate certifies by structural induction over Tree. The other backends decline per the Unimplemented-vocabulary rule: eggregate cannot parse `apply` (400); leanregate/coqregate parse but cannot translate the datatype (unknown). Pins C4 (tree datatype + multi-IH).",
+  "description": "Datatype induction over BINARY TREES with TWO inductive hypotheses (since 1.1): aux t a = a + nodes t, induction on the tree t via exercise.datatype (empty/node, node having two recursive fields l and r). The step unfolds aux (node l v r) a to aux r (aux l (a+1)), then applies IH P(l) at accumulator a+1 and IH P(r) at (a+1)+nodes l \u2014 check_case tries each kind-B step against BOTH server-built IHs. cvc5regate certifies by structural induction over Tree. The other backends decline per the Unimplemented-vocabulary rule: all three now parse `apply` but explicitly decline the non-\u2115 `exercise.datatype` (unknown). Pins C4 (tree datatype + multi-IH).",
   "request": {
     "protocol": "1.1",
     "exercise": {
@@ -1080,7 +1080,9 @@
   },
   "expect": {
     "eggregate": {
-      "error": true
+      "outcome": "unknown",
+      "score": null,
+      "certified": false
     },
     "leanregate": {
       "outcome": "unknown",

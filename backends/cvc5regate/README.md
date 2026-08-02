@@ -105,6 +105,30 @@ A single-variable induction whose goal is a **relation** — `=`, `≤`, `<`, `�
 | `2·Σᵢ = n(n+1)` | `proven_equal`, certified | recursive sum |
 | `2ⁿ = n+1` (false) | `proven_unequal`, witness `n=2` | disproof |
 
+### Named functions (`apply`) — the operator escape hatch
+
+A function call is an `apply` node and the function itself travels as `definitions`,
+so a host adds a new operator as **data** rather than as a new MathNode type. Two
+definition shapes are accepted, told apart by whether the left-hand side matches a
+datatype constructor:
+
+| shape | example `definitions` | emitted |
+|---|---|---|
+| recursive | `sum(0) → 0`, `sum(S k) → S k + sum(k)` | `define-fun-rec` over a `match` |
+| non-recursive | `avg(a, b) → (a+b)/2` | plain `define-fun` (a macro) |
+
+A recursive function needs **both** a base-constructor and a step-constructor rule,
+recursing on the same argument position in both (any position; the other arguments
+are accumulators and must be named identically in the two rules). A non-recursive
+operator is **one** equation over distinct pattern variables whose body does not call
+the function itself. Anything else — a missing case, a self-referential `define-fun`,
+a mix of the two shapes, a function used with no definition — is declined as
+`unknown`, never graded. Note the escape hatch extends the *syntax*, not the fragment:
+the body must itself be translatable, so an operator needing a case split (`max`) or a
+primitive cvc5regate has no node for is still out of scope. `apply` works in induction
+mode, in the equational (`transformation`/`equation`) oracle, in a `ruleset` rule under
+`verify_rules`, and in the student's submitted steps (matched symbolically, no solver).
+
 Goals that are *translated correctly* but on which cvc5's automation times out are
 reported honestly as `unknown` (never a false grade): some two-variable equalities
 such as `aᵐ⁺ⁿ = aᵐ·aⁿ`, and strengthening-needing inequalities such as `2ⁿ > n`

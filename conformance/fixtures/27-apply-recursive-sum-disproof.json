@@ -1,6 +1,6 @@
 {
   "name": "27-apply-recursive-sum-disproof",
-  "description": "An induction goal over the `apply` term node (n-ary named function, since 1.1): 2*sum(n) = n*(n+2) is FALSE (the true closed form is n*(n+1)). cvc5regate translates `apply` to a define-fun-rec and disproves it with a numeric witness (n=1). The other backends decline per the Unimplemented-vocabulary rule: eggregate cannot parse `apply` (400 error); leanregate/coqregate parse it but cannot translate it, so they return `unknown`. Pins the `apply` node, `exercise.domain`, and the witness path.",
+  "description": "An induction goal over the `apply` term node (n-ary named function, since 1.1): 2*sum(n) = n*(n+2) is FALSE (the true closed form is n*(n+1)). cvc5regate translates `apply` to a define-fun-rec and disproves it with a numeric witness (n=1). The other backends decline per the Unimplemented-vocabulary rule: all three non-cvc5 backends parse `apply` but cannot grade this request, so each returns `unknown`. Pins the `apply` node, `exercise.domain`, and the witness path.",
   "request": {
     "protocol": "1.1",
     "exercise": {
@@ -163,7 +163,9 @@
   },
   "expect": {
     "eggregate": {
-      "error": true
+      "outcome": "unknown",
+      "score": null,
+      "certified": false
     },
     "leanregate": {
       "outcome": "unknown",

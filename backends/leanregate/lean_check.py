@@ -73,14 +73,45 @@ def match(pattern: dict, node: dict, env: dict | None = None) -> dict | None:
 def instantiate(template: dict, env: dict) -> dict:
     if template["type"] == "wild":
         return copy.deepcopy(env[template["value"]])
-    if "slots" not in template:
-        out = {"type": template["type"]}
-        if "value" in template:
-            out["value"] = template["value"]
-        return out
-    return {"type": template["type"],
-            "slots": {k: [instantiate(x, env) for x in v]
-                      for k, v in template["slots"].items()}}
+    out = {"type": template["type"]}
+    if "value" in template:
+        # An INTERNAL node may carry a value too: `apply` holds the function name.
+        # Dropping it here silently turned `fact_aux(…)` into an anonymous node, so
+        # the instantiated result never equalled the student's claimed one — a
+        # fabricated-step verdict on a correct step.
+        out["value"] = template["value"]
+    if "slots" in template:
+        out["slots"] = {k: [instantiate(x, env) for x in v]
+                        for k, v in template["slots"].items()}
+    return out
+
+
+def generalize_ih(node: dict, indvar: str) -> dict:
+    """Turn every `variable` except the induction variable into a `wild` of the same
+    name. The inductive hypothesis is universal in its accumulators — the emitted
+    Lean proof generalizes them (`induction n generalizing x`) and the kernel
+    backstop certifies that same universal — so in the step the student may apply the
+    IH at a *shifted* accumulator (`fact_aux x (S n) → fact_aux (x·(S n)) n`, then the
+    IH at `x·(S n)`). The induction variable stays literal: the IH holds at `n`, not
+    at an arbitrary value."""
+    if node.get("type") == "variable" and str(node.get("value")) != indvar:
+        return {"type": "wild", "value": node["value"]}
+    out = {"type": node.get("type")}
+    if "value" in node:
+        out["value"] = node["value"]
+    if "slots" in node:
+        out["slots"] = {k: [generalize_ih(c, indvar) for c in v]
+                        for k, v in node["slots"].items()}
+    return out
+
+
+def _wild_names(node: dict) -> set:
+    """Every `wild` name appearing in a template."""
+    names = {node["value"]} if node.get("type") == "wild" else set()
+    for kids in (node.get("slots") or {}).values():
+        for k in kids:
+            names |= _wild_names(k)
+    return names
 
 
 # ---------------------------------------------------------------------------
@@ -255,9 +286,8 @@ def _check_case(source: dict, steps: list[dict], rules: dict[str, ProvenRule],
                 steps_out.append({"index": i, "status": "open", "reason": r})
                 return DerivationReport("uncertifiable", None, steps_out, i, r)
             eqn = step.get("equation")
-            if not (isinstance(eqn, list) and len(eqn) == 2
-                    and eqn[0] == ih[0] and eqn[1] == ih[1]):
-                r = "Leibniz substitution is not the inductive hypothesis"
+            if not (isinstance(eqn, list) and len(eqn) == 2):
+                r = "Leibniz substitution needs an [lhs, rhs] equation"
                 steps_out.append({"index": i, "status": "invalid", "reason": r})
                 return DerivationReport("invalid", None, steps_out, i, r)
             path = tuple(step.get("path", []))
@@ -267,11 +297,31 @@ def _check_case(source: dict, steps: list[dict], rules: dict[str, ProvenRule],
                 r = f"path {list(path)} is not in the expression"
                 steps_out.append({"index": i, "status": "invalid", "reason": r})
                 return DerivationReport("invalid", None, steps_out, i, r)
-            if target != ih[0]:
-                r = "the substituted subterm is not the inductive hypothesis' LHS"
+            # The IH is an equation, so it substitutes in either direction: forward rewrites its
+            # LHS to its RHS, reverse folds the RHS back into the LHS. Equality is symmetric and
+            # the Nat.rec backstop certifies the same statement either way, so the reverse adds no
+            # strength — it only lets a derivation reintroduce the recursive call. `equation` is
+            # (pre-rewrite, post-rewrite) and so names the direction; forward is tried first.
+            #
+            # `ih` is generalized over its accumulators (wildcards, see `generalize_ih`), so the
+            # instance σ the student used is *recovered* by matching against the target subterm.
+            # A pure-ℕ IH has no wildcards and this reduces to the old exact match. The declared
+            # `equation` is re-checked against that instance, so a substitution that is not an
+            # instance of the IH is still rejected (fixture 20's circular IH included).
+            ih_to = None
+            for pattern, template in ((ih[0], ih[1]), (ih[1], ih[0])):
+                sigma = match(pattern, target, {})
+                if sigma is None or not _wild_names(template) <= set(sigma):
+                    continue
+                cand_from, cand_to = instantiate(pattern, sigma), instantiate(template, sigma)
+                if eqn[0] == cand_from and eqn[1] == cand_to:
+                    ih_to = cand_to
+                    break
+            if ih_to is None:
+                r = "Leibniz substitution is not an instance of the inductive hypothesis"
                 steps_out.append({"index": i, "status": "invalid", "reason": r})
                 return DerivationReport("invalid", None, steps_out, i, r)
-            result = replace(state, path, copy.deepcopy(ih[1]))
+            result = replace(state, path, copy.deepcopy(ih_to))
             claimed = step.get("result")
             if claimed is not None and claimed != result:
                 r = "claimed result does not match the inductive-hypothesis substitution"
@@ -329,7 +379,12 @@ def check_induction(ex: dict, sub: dict,
     base_goal = substitute(goal, var, _num(0))
     succ = {"type": "succ", "slots": {"inner": [{"type": "variable", "value": var}]}}
     step_goal = substitute(goal, var, succ)
-    ih = (goal["slots"]["left"][0], goal["slots"]["right"][0])  # P(var)
+    # P(var), generalized over its accumulators: the emitted Lean proof generalizes
+    # them before inducting, so the student may use the IH at a shifted accumulator —
+    # what an `apply` accumulator function (`fact_aux`) needs. Without a shift this is
+    # the old exact-match IH.
+    ih = (generalize_ih(goal["slots"]["left"][0], var),
+          generalize_ih(goal["slots"]["right"][0], var))
 
     base = _check_case(base_goal, base_steps, rules, ih=None)
     if base.status != "certified":

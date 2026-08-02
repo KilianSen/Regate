@@ -41,6 +41,44 @@ MUST_PASS = [
     # base/step tactic block does not depend on the IH being usable.
     ("2^n = 2^n", ex(eq(powr(num(2), vr("n")), powr(num(2), vr("n"))))),
 ]
+
+# ---------------------------------------------------------------------------
+# `apply` — n-ary named function application (protocol 1.1). A function arrives as
+# DATA: an `apply` node plus a base rule (matching `0`) and a step rule (matching
+# `S k`), which coqregate emits as a Coq `Fixpoint`. Both goals below kernel-check
+# on Coq 8.20.1, so they are MUST_PASS: they pin that the emitted `{struct n}`
+# Fixpoint is accepted by the termination checker, and that `revert`+`cbn [f …]`
+# lets `ring` close a step whose IH is applied at a shifted accumulator.
+# ---------------------------------------------------------------------------
+def ap(f, *args): return {"type": "apply", "value": f, "slots": {"args": list(args)}}
+
+
+# Two names for the same recursion: provable with the IH at `n` itself.
+TWIN_DEFS = [rule("p_zero", ap("p", num(0)), num(1)),
+             rule("p_succ", ap("p", succ(wd("k"))), mul(num(2), ap("p", wd("k")))),
+             rule("q_zero", ap("q", num(0)), num(1)),
+             rule("q_succ", ap("q", succ(wd("k"))), mul(num(2), ap("q", wd("k"))))]
+
+# An ACCUMULATOR function: the step needs the IH at the shifted accumulator
+# `x·(S k)`, which is why the emitted proof reverts the ℚ binders before inducting.
+FACT_DEFS = [rule("factaux_zero", ap("fact_aux", wd("x"), num(0)), wd("x")),
+             rule("factaux_succ", ap("fact_aux", wd("x"), succ(wd("k"))),
+                  ap("fact_aux", mul(wd("x"), succ(wd("k"))), wd("k"))),
+             rule("fact_zero", ap("fact", num(0)), num(1)),
+             rule("fact_succ", ap("fact", succ(wd("k"))),
+                  mul(succ(wd("k")), ap("fact", wd("k"))))]
+
+# Defined after the `ap`/DEFS helpers, so appended rather than listed above.
+MUST_PASS += [
+    ("apply: p n = q n (twin recursive functions)",
+     {"mode": "induction", "goal": eq(ap("p", vr("n")), ap("q", vr("n"))),
+      "inductionVar": "n", "definitions": TWIN_DEFS}),
+    ("apply: fact_aux x n = x * fact n (generalized IH)",
+     {"mode": "induction", "goal": eq(ap("fact_aux", vr("x"), vr("n")),
+                                      mul(vr("x"), ap("fact", vr("n")))),
+      "inductionVar": "n", "definitions": FACT_DEFS}),
+]
+
 # Exploratory — logged, never fatal (promote to MUST_PASS once confirmed in CI).
 BEST_EFFORT: list = []
 

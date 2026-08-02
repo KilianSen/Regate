@@ -36,7 +36,18 @@ SLOTS: dict[str, tuple[str, ...]] = {
     "pow": ("base", "exponent"),
     # 'wild' is a pattern-only block (wildcards a, b, c); see catalogue.py.
     "wild": (),
+    # n-ary NAMED function application (protocol 1.1). Its single slot 'args' holds
+    # an ORDERED LIST of arbitrary length rather than one child, and `value` carries
+    # the function name -- see VARIADIC below. The path encoding is unchanged: the
+    # flat child list of an `apply` is exactly its args, in order.
+    "apply": ("args",),
 }
+
+# Blocks whose (single) slot holds a list of children instead of exactly one.
+# Everything downstream of `kids` is already n-ary (MathNode.kids is a tuple, and
+# matching/instantiation/replace/paths compare arities), so this set is only
+# consulted by the JSON (de)serializer and the slot-name accessor.
+VARIADIC: frozenset[str] = frozenset({"apply"})
 
 Path = tuple[int, ...]
 
@@ -51,6 +62,10 @@ class MathNode:
 
     # -- slot access by name (independent of storage order) ----------------
     def slot(self, name: str) -> "MathNode":
+        if self.op in VARIADIC:
+            # A variadic slot is a list, not a child: refuse rather than silently
+            # hand back kids[0] and let a caller mistake it for "the" argument.
+            raise ValueError(f"{self.op!r} has a variadic slot; use .kids")
         return self.kids[SLOTS[self.op].index(name)]
 
     # -- traversal ---------------------------------------------------------
@@ -124,6 +139,14 @@ def power(base: MathNode, exponent: MathNode) -> MathNode:
     return MathNode("pow", kids=(base, exponent))
 
 
+def apply(name: str, *args: MathNode) -> MathNode:
+    """A named n-ary function application, ``name(args...)`` (protocol 1.1).
+
+    The function carries no built-in meaning: it is defined by the request's
+    recursive ``definitions`` (rules whose LHS is this ``apply`` shape)."""
+    return MathNode("apply", name, tuple(args))
+
+
 def subst_var(node: "MathNode", name: str, replacement: "MathNode") -> "MathNode":
     """Substitute every ``variable`` named ``name`` with ``replacement`` (used to
     instantiate an induction goal P(var) at 0 and at S(var))."""
@@ -141,15 +164,33 @@ def to_json(node: MathNode):
     # number/variable carry a value; 'wild' (rule-pattern wildcard) carries its name
     if node.op in ("number", "variable", "wild"):
         return {"type": node.op, "value": node.value}
+    if node.op in VARIADIC:
+        # `apply`: one slot holding the ordered argument list; `value` is the
+        # function name.
+        (slot_name,) = SLOTS[node.op]
+        return {"type": node.op, "value": node.value,
+                "slots": {slot_name: [to_json(k) for k in node.kids]}}
     slots = {name: [to_json(node.slot(name))] for name in SLOTS[node.op]}
     return {"type": node.op, "slots": slots}
 
 
 def from_json(obj: dict) -> MathNode:
     t = obj["type"]
+    if t not in SLOTS:
+        raise ValueError(f"unknown node type {t!r}")
     if t in ("number", "variable", "wild"):
         return MathNode(t, str(obj["value"]))
     slots = obj["slots"]
+    if t in VARIADIC:
+        (slot_name,) = SLOTS[t]
+        name = obj.get("value")
+        if not isinstance(name, str) or not name:
+            raise ValueError(f"{t!r} requires a non-empty string 'value' "
+                             f"(the function name), got {name!r}")
+        args = slots[slot_name]
+        if not isinstance(args, (list, tuple)):
+            raise ValueError(f"{t!r} slot {slot_name!r} must be a list of arguments")
+        return MathNode(t, name, tuple(from_json(a) for a in args))
     kids = tuple(from_json(slots[name][0]) for name in SLOTS[t])
     return MathNode(t, None, kids)
 
@@ -192,6 +233,8 @@ def pretty(node: MathNode) -> str:
     if op == "pow":
         below = {"add", "sub", "eq", "mul", "frac", "neg"}
         return f"{_wrap(node.slot('base'), below)}^{_wrap(node.slot('exponent'), below)}"
+    if op == "apply":
+        return f"{node.value or '?'}({', '.join(pretty(k) for k in node.kids)})"
     raise ValueError(f"cannot render {op}")
 
 

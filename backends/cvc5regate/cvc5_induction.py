@@ -205,7 +205,10 @@ def _infer(node: dict, dom: str, env: dict[str, str], indvar: str = "",
         sig = sigs.get(name)
         if sig is None:
             # Legacy ℕ default: last argument is the recursion variable, rest numeric.
-            if dt.name != "Nat":
+            # A *nullary* application has no such argument — without this guard the
+            # `args[-1]` below raised an uncaught IndexError (HTTP 500 / exit 1) on any
+            # request carrying an undefined nullary `apply` (e.g. a bare `nil`).
+            if dt.name != "Nat" or not args:
                 raise InductionError(f"unknown function {name!r} (no definition)")
             for a in args[:-1]:
                 _infer(a, "Q", env, indvar, sigs, dt)
@@ -322,7 +325,8 @@ def _term(node: dict, ctx: _Ctx) -> str:
         sig = ctx.sigs.get(fname)
         if sig is None:
             # Legacy ℕ default: last argument is the recursion variable, rest numeric.
-            if ctx.dt.name != "Nat":
+            # `not args` guards the same nullary-application IndexError as `_infer`.
+            if ctx.dt.name != "Nat" or not args:
                 raise InductionError(f"unknown function {fname!r} (no definition)")
             parts = [_term(a, ctx) for a in args[:-1]] + [_dt_term(args[-1], ctx)]
         else:
@@ -406,26 +410,90 @@ def _fresh(base: str, used: set) -> str:
     return name
 
 
+def _apply_names(node: dict) -> set:
+    """Every function/constructor name applied anywhere in `node`."""
+    names = {str(node["value"])} if node.get("type") == "apply" else set()
+    for kids in (node.get("slots") or {}).values():
+        for k in kids:
+            names |= _apply_names(k)
+    return names
+
+
+def _plain_def(name: str, rules: list[dict], ctx: _Ctx) -> str:
+    """A NON-recursive named operator as a plain `define-fun`.
+
+    This is the escape hatch a host uses to add an ordinary binary/n-ary operator as
+    *data* — one defining equation with pattern-variable parameters, e.g.
+    `avg(a, b) → (a + b)/2` — instead of a new MathNode type wired into the backend.
+    A non-recursive `define-fun` is a definitional extension (a macro): unfolding it
+    is conservative, so it is strictly safer than the `define-fun-rec` axiom a
+    recursive definition emits. It is also purely *syntactic* power: the body must
+    already be translatable vocabulary, so this widens the surface syntax, it does
+    not widen the SMT fragment.
+
+    Requirements, each an `InductionError` (→ `unknown`, never a wrong grade):
+    exactly one equation (a case split must be given as constructor rules), distinct
+    pattern-variable parameters, and no self-reference (`define-fun` cannot recurse —
+    a recursive operator needs the base/step constructor rules below).
+    """
+    if len(rules) != 1:
+        raise InductionError(
+            f"non-recursive function {name!r} needs exactly one defining equation "
+            f"(got {len(rules)}); a case split must be given as constructor rules")
+    d = rules[0]
+    params = [_wild(a) for a in d["lhs"]["slots"]["args"]]
+    if len(set(params)) != len(params):
+        raise InductionError(f"definition of {name!r} repeats a parameter name")
+    if name in _apply_names(d["rhs"]):
+        raise InductionError(
+            f"{name!r} is defined non-recursively but its body calls itself; supply a "
+            f"{ctx.dt.base_ctor().name}-rule and a {ctx.dt.step_ctor().name}-rule instead")
+    body = _term(d["rhs"], ctx)
+    ps = " ".join(f"({p} {ctx.sort})" for p in params)
+    return f"(define-fun {name} ({ps}) {ctx.sort}\n  {body})\n"
+
+
 def _build_apply_defs(definitions: list[dict], ctx: _Ctx) -> str:
-    """`define-fun-rec` for each recursive function supplied as `apply` definitions —
-    a base-constructor rule and a step-constructor rule, recursing on the
-    constructor-matched argument (any position, per the datatype descriptor)."""
+    """SMT definitions for every function supplied as `apply` definitions.
+
+    Two shapes, distinguished by whether the left-hand side matches a constructor:
+
+    * **recursive** — a base-constructor rule and a step-constructor rule, recursing
+      on the constructor-matched argument (any position, per the datatype
+      descriptor) → `define-fun-rec` over a `match`.
+    * **non-recursive** — a single equation over pattern variables (`avg(a,b) → …`)
+      → a plain `define-fun` (see `_plain_def`). This is what lets a host add an
+      ordinary binary operator without a new MathNode type.
+    """
     dt = ctx.dt
     base_c, step_c = dt.base_ctor(), dt.step_ctor()
     by_name: dict[str, dict] = {}
+    plain: dict[str, list] = {}
+    order: list[str] = []
     for d in definitions:
         lhs = d.get("lhs", {})
         if lhs.get("type") != "apply":
             continue
         name = str(lhs["value"])
         args = lhs["slots"]["args"]
+        if name not in order:
+            order.append(name)
         ridx = _rec_index(args, dt)
         if ridx is None:
-            raise InductionError(f"definition of {name!r} does not match a {dt.name} constructor")
+            plain.setdefault(name, []).append(d)
+            continue
         ctor = _ctor_of(args[ridx], dt)
         by_name.setdefault(name, {})[ctor.name] = (d, ridx)
     out = []
-    for name, rules in by_name.items():
+    for name in order:                       # emit in the order the request declared them
+        if name in plain and name in by_name:
+            raise InductionError(
+                f"definition of {name!r} mixes constructor rules with a non-recursive "
+                f"equation; give either one equation or a full set of constructor rules")
+        if name in plain:
+            out.append(_plain_def(name, plain[name], ctx))
+            continue
+        rules = by_name[name]
         if base_c.name not in rules or step_c.name not in rules:
             raise InductionError(
                 f"recursive function {name!r} needs a {base_c.name}-rule and a {step_c.name}-rule")
@@ -435,6 +503,22 @@ def _build_apply_defs(definitions: list[dict], ctx: _Ctx) -> str:
             raise InductionError(f"{name!r} recurses on inconsistent argument positions")
         ridx = sridx
         s_args = step_d["lhs"]["slots"]["args"]
+        b_args = base_d["lhs"]["slots"]["args"]
+        # The emitted parameters come from the STEP rule, but the base rule's body is
+        # translated as written — so the two rules must name the shared (non-recursion)
+        # parameters identically, or the base branch would reference an unbound symbol
+        # and cvc5 would fail to parse the file. Decline cleanly instead.
+        if len(b_args) != len(s_args):
+            raise InductionError(
+                f"{name!r}: the {base_c.name}-rule takes {len(b_args)} arguments but the "
+                f"{step_c.name}-rule takes {len(s_args)}")
+        for i, (ba, sa) in enumerate(zip(b_args, s_args)):
+            if i == ridx:
+                continue
+            if _wild(ba) != _wild(sa):
+                raise InductionError(
+                    f"{name!r}: the {base_c.name}-rule calls argument {i} {_wild(ba)!r} but the "
+                    f"{step_c.name}-rule calls it {_wild(sa)!r}; use one name in both rules")
         fields = _ctor_field_names(s_args[ridx], dt)
         used = {_wild(a) for i, a in enumerate(s_args) if i != ridx} | set(fields)
         subj = _fresh(dt.name.lower(), used)         # the match subject (recursion param)
@@ -610,14 +694,22 @@ def build_rule_source(rule: dict, ex: dict) -> str:
     if not lhs_node or not rhs_node:
         raise InductionError("rule needs lhs and rhs")
 
+    # The datatype + function signatures come from the exercise, exactly as in
+    # `_translate`. Without them every `apply` fell back to the legacy ℕ heuristic
+    # ("the last argument is the recursion variable"), which mistyped a non-ℕ
+    # datatype, mistyped a non-recursive operator's last argument as a ℕ, and crashed
+    # outright (IndexError) on a nullary application such as `nil`.
+    dt = _parse_datatype(ex)
+    definitions = ex.get("definitions") or []
+    sigs = _signatures(definitions, dt)
+
     env: dict[str, str] = {}
-    _infer(lhs_node, "Q", env)
-    _infer(rhs_node, "Q", env)
+    _infer(lhs_node, "Q", env, "", sigs, dt)
+    _infer(rhs_node, "Q", env, "", sigs, dt)
 
     sort = _numsort(ex, ex.get("goal") or {"type": "eq"})
-    ctx = _Ctx(sort, env)
+    ctx = _Ctx(sort, env, dt, sigs)
 
-    definitions = ex.get("definitions") or []
     defs = ""
     if _mentions(lhs_node, ("pow",)) or _mentions(rhs_node, ("pow",)):
         defs += _build_pow(definitions, ctx)
@@ -627,9 +719,14 @@ def build_rule_source(rule: dict, ex: dict) -> str:
     body = f"(= {_term(lhs_node, ctx)} {_term(rhs_node, ctx)})"
     preamble = _preamble(ctx, defs)
 
-    # ℕ binders first (see build_prove_source): a rule quantifying over a ℕ variable
-    # is proven the same way, and cvc5's induction heuristics lead with the datatype.
+    # Datatype binders first (see build_prove_source): a rule quantifying over a ℕ or
+    # other datatype variable is proven the same way, and cvc5's induction heuristics
+    # lead with the datatype. A variable typed as a non-ℕ datatype (`t : List` in
+    # `summa(cons h t) = h + summa t`) previously fell out of the binder list entirely
+    # and left an unbound symbol behind — an unprovable file, i.e. a false negative.
     binders = [f"({v} Nat)" for v, d in sorted(env.items()) if d == "N"]
+    if dt.name != "Nat":
+        binders += [f"({v} {dt.name})" for v, d in sorted(env.items()) if d == dt.name]
     binders += [f"({v} {sort})" for v, d in sorted(env.items()) if d == "Q"]
     if not binders:                       # a ground rule: no quantifier needed
         return preamble + f"(assert (not {body}))\n(check-sat)\n"

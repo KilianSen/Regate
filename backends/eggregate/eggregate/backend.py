@@ -51,6 +51,34 @@ class Math(Expr):
     def __neg__(self) -> "Math": ...                         # Negation
     def equals(self, other: "Math") -> "Math": ...           # Equality block
 
+    # --- `apply`: n-ary NAMED function application (protocol 1.1) -----------
+    # egglog functions are fixed-arity, so the n-ary `apply` node is encoded as
+    # one egglog constructor per arity, with the function name carried as a
+    # String argument. That keeps the encoding *data-driven*: a host adds a new
+    # binary operator by sending an `apply` node plus its `definitions`, and no
+    # egglog declaration changes. Congruence is exactly right -- `call2("f",x,y)`
+    # and `call2("f",x',y')` are merged iff the name matches and the arguments
+    # are in the same e-classes -- and two different names can never be confused,
+    # because the String literal is part of the term.
+    @classmethod
+    def call0(cls, fn: StringLike) -> "Math": ...
+    @classmethod
+    def call1(cls, fn: StringLike, a0: "Math") -> "Math": ...
+    @classmethod
+    def call2(cls, fn: StringLike, a0: "Math", a1: "Math") -> "Math": ...
+    @classmethod
+    def call3(cls, fn: StringLike, a0: "Math", a1: "Math", a2: "Math") -> "Math": ...
+    @classmethod
+    def call4(cls, fn: StringLike, a0: "Math", a1: "Math", a2: "Math",
+              a3: "Math") -> "Math": ...
+
+
+# Arities of `apply` the theory can hold. An application wider than this is not
+# translatable, so the oracle simply declines (ValueError -> `equivalent` returns
+# False -> UNKNOWN); it is never graded wrong.
+_CALL = (Math.call0, Math.call1, Math.call2, Math.call3, Math.call4)
+MAX_APPLY_ARITY = len(_CALL) - 1
+
 
 def _to_egglog(node: MathNode, env: dict):
     """Translate a model node (possibly with wildcards) into an egglog term."""
@@ -75,6 +103,12 @@ def _to_egglog(node: MathNode, env: dict):
         return -k[0]
     if op == "eq":
         return k[0].equals(k[1])
+    if op == "apply":
+        if len(k) > MAX_APPLY_ARITY:
+            raise ValueError(f"apply arity {len(k)} exceeds {MAX_APPLY_ARITY}")
+        if not node.value:
+            raise ValueError("apply without a function name")
+        return _CALL[len(k)](node.value, *k)
     raise ValueError(f"cannot translate {op}")
 
 
@@ -140,10 +174,22 @@ def build_ruleset(rules: list[Rule] | None = None):
     """Compile the (shared) catalogue into an egglog ruleset.
 
     Rules whose guards are not soundly compilable are dropped (``_compile``
-    returns ``None``); they live only in the step validator.
+    returns ``None``); they live only in the step validator. Rules the egglog
+    signature cannot express at all are dropped too, per-rule rather than
+    failing the whole theory.
     """
     rules = CATALOGUE if rules is None else rules
-    compiled = [c for c in (_compile(r) for r in rules) if c is not None]
+    compiled = []
+    for r in rules:
+        try:
+            c = _compile(r)
+        except ValueError:
+            # Outside the egglog signature (e.g. an `apply` wider than
+            # MAX_APPLY_ARITY, or a `succ`/`pow` induction op). Dropping the rule
+            # only ever weakens the oracle, which reads a miss as "not proven".
+            continue
+        if c is not None:
+            compiled.append(c)
     return ruleset(*compiled)
 
 

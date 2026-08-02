@@ -283,17 +283,27 @@ def check_case(source: dict, steps: list[dict], rules: dict[str, Rule],
             if ih is None:
                 return CaseReport("uncertifiable", None, f"step {i}: IH substitution with no hypothesis available")
             eqn = step.get("equation")
-            if not (isinstance(eqn, list) and len(eqn) == 2
-                    and ac_equal(eqn[0], ih[0], ac) and ac_equal(eqn[1], ih[1], ac)):
+            if not (isinstance(eqn, list) and len(eqn) == 2):
+                return CaseReport("invalid", None, f"step {i}: substitution is not the inductive hypothesis")
+            # The IH is an equation, so it substitutes in either direction: forward rewrites the
+            # IH's LHS to its RHS, reverse folds the RHS back into the LHS. Equality is symmetric
+            # and Coq certifies the same statement either way, so the reverse adds no strength —
+            # it only lets a derivation reintroduce the recursive call. The declared `equation` is
+            # (pre-rewrite, post-rewrite) and so names the direction; forward is tried first.
+            if ac_equal(eqn[0], ih[0], ac) and ac_equal(eqn[1], ih[1], ac):
+                ih_from, ih_to = ih[0], ih[1]
+            elif ac_equal(eqn[0], ih[1], ac) and ac_equal(eqn[1], ih[0], ac):
+                ih_from, ih_to = ih[1], ih[0]
+            else:
                 return CaseReport("invalid", None, f"step {i}: substitution is not the inductive hypothesis")
             path = tuple(step.get("path", []))
             try:
                 target = at(state, path)
             except (IndexError, KeyError, TypeError):
                 return CaseReport("invalid", None, f"step {i}: path {list(path)} is not in the expression")
-            if not ac_equal(target, ih[0], ac):
-                return CaseReport("invalid", None, f"step {i}: the substituted subterm is not the IH's LHS")
-            result = replace(state, path, copy.deepcopy(ih[1]))
+            if not ac_equal(target, ih_from, ac):
+                return CaseReport("invalid", None, f"step {i}: the substituted subterm is not the IH side being rewritten")
+            result = replace(state, path, copy.deepcopy(ih_to))
             claimed = step.get("result")
             if claimed is not None and not ac_equal(claimed, result, ac):
                 return CaseReport("invalid", None, f"step {i}: claimed result does not match the IH substitution")

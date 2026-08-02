@@ -76,14 +76,39 @@ def evaluate(node: MathNode, env: dict[str, Fraction]):
         return base ** e
     if op == "eq":                   # relational, not a numeric value
         return None
+    # `apply` (protocol 1.1) is a NAMED, uninterpreted function: its meaning lives
+    # in the request's recursive `definitions`, which this ℚ evaluator does not
+    # unfold. There is no value to compute, so we must not invent one -- raise, and
+    # let `_try_evaluate` turn the whole term into "undefined" (see below). Any
+    # attempt to "helpfully" return e.g. 0 here would fabricate counterexamples and
+    # produce false `proven_unequal` verdicts.
     raise ValueError(f"cannot evaluate {op}")
+
+
+_EVALUABLE_OPS = frozenset({
+    "number", "variable", "wild", "add", "sub", "mul", "frac", "neg", "succ",
+    "pow", "eq",
+})
+
+
+def is_evaluable(node: MathNode) -> bool:
+    """Is every operator in ``node`` inside the exact-ℚ fragment this module can
+    evaluate? ``apply`` (and any unknown op) is not -- see ``audit.audit_rule``,
+    which must not report a rule it cannot even evaluate as fuzz-verified."""
+    return (node.op in _EVALUABLE_OPS
+            and all(is_evaluable(k) for k in node.kids))
 
 
 def _try_evaluate(node: MathNode, env: dict[str, Fraction]):
     """``evaluate``, but an op outside the rational fragment is *undefined* rather
     than an error -- an unevaluable point can never witness inequality, so
     swallowing it here is sound (it only ever costs us a disproof, never invents
-    one)."""
+    one).
+
+    This is the load-bearing guarantee for `apply`: a term containing a function
+    application evaluates to ``None`` at every point, so ``find_counterexample``
+    below can never return an assignment for it -- "cannot decide", never
+    "unequal"."""
     try:
         return evaluate(node, env)
     except ValueError:

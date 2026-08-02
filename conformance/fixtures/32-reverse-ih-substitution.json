@@ -1,0 +1,391 @@
+{
+  "name": "32-reverse-ih-substitution",
+  "description": "A kind-B step applies the induction hypothesis in reverse \u2014 folding the RHS `1` back into `1^n` \u2014 instead of unfolding `1^n` to `1`. Equality is symmetric, so this is the same universal the backend certifies; it is what lets a derivation reintroduce a recursive call. Pins that the IH substitution is direction-agnostic.",
+  "request": {
+    "protocol": "1.1",
+    "exercise": {
+      "mode": "induction",
+      "goal": {
+        "type": "eq",
+        "slots": {
+          "left": [
+            {
+              "type": "pow",
+              "slots": {
+                "base": [
+                  {
+                    "type": "number",
+                    "value": "1"
+                  }
+                ],
+                "exponent": [
+                  {
+                    "type": "variable",
+                    "value": "n"
+                  }
+                ]
+              }
+            }
+          ],
+          "right": [
+            {
+              "type": "number",
+              "value": "1"
+            }
+          ]
+        }
+      },
+      "inductionVar": "n",
+      "definitions": [
+        {
+          "id": "pow_zero",
+          "owner": "pow",
+          "lhs": {
+            "type": "pow",
+            "slots": {
+              "base": [
+                {
+                  "type": "wild",
+                  "value": "a"
+                }
+              ],
+              "exponent": [
+                {
+                  "type": "number",
+                  "value": "0"
+                }
+              ]
+            }
+          },
+          "rhs": {
+            "type": "number",
+            "value": "1"
+          },
+          "bidirectional": false,
+          "conditions": []
+        },
+        {
+          "id": "pow_succ",
+          "owner": "pow",
+          "lhs": {
+            "type": "pow",
+            "slots": {
+              "base": [
+                {
+                  "type": "wild",
+                  "value": "a"
+                }
+              ],
+              "exponent": [
+                {
+                  "type": "succ",
+                  "slots": {
+                    "inner": [
+                      {
+                        "type": "wild",
+                        "value": "n"
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          },
+          "rhs": {
+            "type": "mul",
+            "slots": {
+              "left": [
+                {
+                  "type": "wild",
+                  "value": "a"
+                }
+              ],
+              "right": [
+                {
+                  "type": "pow",
+                  "slots": {
+                    "base": [
+                      {
+                        "type": "wild",
+                        "value": "a"
+                      }
+                    ],
+                    "exponent": [
+                      {
+                        "type": "wild",
+                        "value": "n"
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          },
+          "bidirectional": false,
+          "conditions": []
+        }
+      ],
+      "id": "32-reverse-ih-substitution",
+      "ruleset": [
+        {
+          "id": "mul_one_left",
+          "lhs": {
+            "type": "mul",
+            "slots": {
+              "left": [
+                {
+                  "type": "number",
+                  "value": "1"
+                }
+              ],
+              "right": [
+                {
+                  "type": "wild",
+                  "value": "a"
+                }
+              ]
+            }
+          },
+          "rhs": {
+            "type": "wild",
+            "value": "a"
+          },
+          "bidirectional": false,
+          "conditions": []
+        }
+      ]
+    },
+    "submission": {
+      "base": {
+        "steps": [
+          {
+            "rule": "pow_zero",
+            "path": [
+              0
+            ],
+            "result": {
+              "type": "eq",
+              "slots": {
+                "left": [
+                  {
+                    "type": "number",
+                    "value": "1"
+                  }
+                ],
+                "right": [
+                  {
+                    "type": "number",
+                    "value": "1"
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "step": {
+        "steps": [
+          {
+            "rule": "pow_succ",
+            "path": [
+              0
+            ],
+            "result": {
+              "type": "eq",
+              "slots": {
+                "left": [
+                  {
+                    "type": "mul",
+                    "slots": {
+                      "left": [
+                        {
+                          "type": "number",
+                          "value": "1"
+                        }
+                      ],
+                      "right": [
+                        {
+                          "type": "pow",
+                          "slots": {
+                            "base": [
+                              {
+                                "type": "number",
+                                "value": "1"
+                              }
+                            ],
+                            "exponent": [
+                              {
+                                "type": "variable",
+                                "value": "n"
+                              }
+                            ]
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ],
+                "right": [
+                  {
+                    "type": "number",
+                    "value": "1"
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "kind": "B",
+            "path": [
+              1
+            ],
+            "equation": [
+              {
+                "type": "number",
+                "value": "1"
+              },
+              {
+                "type": "pow",
+                "slots": {
+                  "base": [
+                    {
+                      "type": "number",
+                      "value": "1"
+                    }
+                  ],
+                  "exponent": [
+                    {
+                      "type": "variable",
+                      "value": "n"
+                    }
+                  ]
+                }
+              }
+            ],
+            "result": {
+              "type": "eq",
+              "slots": {
+                "left": [
+                  {
+                    "type": "mul",
+                    "slots": {
+                      "left": [
+                        {
+                          "type": "number",
+                          "value": "1"
+                        }
+                      ],
+                      "right": [
+                        {
+                          "type": "pow",
+                          "slots": {
+                            "base": [
+                              {
+                                "type": "number",
+                                "value": "1"
+                              }
+                            ],
+                            "exponent": [
+                              {
+                                "type": "variable",
+                                "value": "n"
+                              }
+                            ]
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ],
+                "right": [
+                  {
+                    "type": "pow",
+                    "slots": {
+                      "base": [
+                        {
+                          "type": "number",
+                          "value": "1"
+                        }
+                      ],
+                      "exponent": [
+                        {
+                          "type": "variable",
+                          "value": "n"
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "rule": "mul_one_left",
+            "path": [
+              0
+            ],
+            "result": {
+              "type": "eq",
+              "slots": {
+                "left": [
+                  {
+                    "type": "pow",
+                    "slots": {
+                      "base": [
+                        {
+                          "type": "number",
+                          "value": "1"
+                        }
+                      ],
+                      "exponent": [
+                        {
+                          "type": "variable",
+                          "value": "n"
+                        }
+                      ]
+                    }
+                  }
+                ],
+                "right": [
+                  {
+                    "type": "pow",
+                    "slots": {
+                      "base": [
+                        {
+                          "type": "number",
+                          "value": "1"
+                        }
+                      ],
+                      "exponent": [
+                        {
+                          "type": "variable",
+                          "value": "n"
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      }
+    }
+  },
+  "expect": {
+    "coqregate": {
+      "outcome": "proven_equal",
+      "score": 100,
+      "certified": true,
+      "has_proof": true,
+      "requires": "coqc"
+    },
+    "cvc5regate": {
+      "outcome": "proven_equal",
+      "score": 100,
+      "certified": true,
+      "has_proof": true,
+      "requires": "cvc5"
+    }
+  }
+}

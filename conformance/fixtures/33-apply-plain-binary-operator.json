@@ -1,0 +1,195 @@
+{
+  "name": "33-apply-plain-binary-operator",
+  "description": "A NEW BINARY OPERATOR ADDED AS PURE DATA. `avg` appears in no backend's source: it arrives as an `apply` node plus a single non-recursive `definitions` equation (avg(a,b) -> (a+b)/2), and the student's one-step derivation cites that definition by id. This pins the claim that a host can add an operator without any backend code change. Graded by the symbolic step checker, so eggregate and cvc5regate both certify it with NO solver and NO toolchain -- deliberately not gated on `requires`, in the style of 24-*. leanregate/coqregate are not asserted: coqregate declines all non-induction modes and leanregate's rule prover has no `apply` fragment, so both return `unknown` here, but leanregate's reason could change once a Lean toolchain is present.",
+  "request": {
+    "protocol": "1.1",
+    "exercise": {
+      "id": "avg-operator",
+      "mode": "transformation",
+      "source": {
+        "type": "apply",
+        "value": "avg",
+        "slots": {
+          "args": [
+            {
+              "type": "variable",
+              "value": "x"
+            },
+            {
+              "type": "variable",
+              "value": "y"
+            }
+          ]
+        }
+      },
+      "target": {
+        "type": "frac",
+        "slots": {
+          "numerator": [
+            {
+              "type": "add",
+              "slots": {
+                "left": [
+                  {
+                    "type": "variable",
+                    "value": "x"
+                  }
+                ],
+                "right": [
+                  {
+                    "type": "variable",
+                    "value": "y"
+                  }
+                ]
+              }
+            }
+          ],
+          "denominator": [
+            {
+              "type": "number",
+              "value": "2"
+            }
+          ]
+        }
+      },
+      "ruleset": [],
+      "definitions": [
+        {
+          "id": "avg_def",
+          "lhs": {
+            "type": "apply",
+            "value": "avg",
+            "slots": {
+              "args": [
+                {
+                  "type": "wild",
+                  "value": "a"
+                },
+                {
+                  "type": "wild",
+                  "value": "b"
+                }
+              ]
+            }
+          },
+          "rhs": {
+            "type": "frac",
+            "slots": {
+              "numerator": [
+                {
+                  "type": "add",
+                  "slots": {
+                    "left": [
+                      {
+                        "type": "wild",
+                        "value": "a"
+                      }
+                    ],
+                    "right": [
+                      {
+                        "type": "wild",
+                        "value": "b"
+                      }
+                    ]
+                  }
+                }
+              ],
+              "denominator": [
+                {
+                  "type": "number",
+                  "value": "2"
+                }
+              ]
+            }
+          },
+          "bidirectional": true,
+          "conditions": []
+        }
+      ]
+    },
+    "submission": {
+      "steps": [
+        {
+          "rule": "avg_def",
+          "path": [],
+          "direction": "forward",
+          "kind": "A",
+          "result": {
+            "type": "frac",
+            "slots": {
+              "numerator": [
+                {
+                  "type": "add",
+                  "slots": {
+                    "left": [
+                      {
+                        "type": "variable",
+                        "value": "x"
+                      }
+                    ],
+                    "right": [
+                      {
+                        "type": "variable",
+                        "value": "y"
+                      }
+                    ]
+                  }
+                }
+              ],
+              "denominator": [
+                {
+                  "type": "number",
+                  "value": "2"
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "final": {
+        "type": "frac",
+        "slots": {
+          "numerator": [
+            {
+              "type": "add",
+              "slots": {
+                "left": [
+                  {
+                    "type": "variable",
+                    "value": "x"
+                  }
+                ],
+                "right": [
+                  {
+                    "type": "variable",
+                    "value": "y"
+                  }
+                ]
+              }
+            }
+          ],
+          "denominator": [
+            {
+              "type": "number",
+              "value": "2"
+            }
+          ]
+        }
+      }
+    }
+  },
+  "expect": {
+    "eggregate": {
+      "outcome": "proven_equal",
+      "score": 100,
+      "certified": true,
+      "has_proof": true
+    },
+    "cvc5regate": {
+      "outcome": "proven_equal",
+      "score": 100,
+      "certified": true,
+      "has_proof": true
+    }
+  }
+}

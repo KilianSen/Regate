@@ -16,7 +16,15 @@ import cvc5_prover
 # variables — so we synthesise a rule `{lhs: source, rhs: target}` and reuse it.
 # The disprove query needs the induction module's low-level translator helpers.
 
-InductionError = ci.InductionError
+# NOT `InductionError = ci.InductionError`. Binding the class object here captures
+# whichever class existed at import time; `importlib.reload(cvc5_induction)` (the
+# test harness does this to drop its stubs) rebuilds the class, after which a
+# captured alias no longer matches what cvc5_induction raises — the `except` below
+# silently stops catching and the error escapes `grade()` as an HTTP 500 / exit 1,
+# which the protocol forbids. Resolving `ci.InductionError` at raise/except time
+# always tracks the live class.
+def _induction_error(*args) -> Exception:
+    return ci.InductionError(*args)
 
 
 @dataclass
@@ -41,14 +49,19 @@ def build_disprove_source(ex: dict, source: dict, target: dict) -> tuple[str, li
     """Counterexample search for `source = target`: the free variables are constants
     and cvc5 (with `--fmf-fun`) hunts a model where the two sides differ. Also
     returns the `get-value` labels naming the witness."""
+    # Datatype + signatures from the exercise, mirroring ci.build_rule_source: an
+    # `apply` must be routed by its declared signature, not by the legacy ℕ guess.
+    dt = ci._parse_datatype(ex)
+    definitions = ex.get("definitions") or []
+    sigs = ci._signatures(definitions, dt)
+
     env: dict[str, str] = {}
-    ci._infer(source, "Q", env)
-    ci._infer(target, "Q", env)
+    ci._infer(source, "Q", env, "", sigs, dt)
+    ci._infer(target, "Q", env, "", sigs, dt)
 
     sort = ci._numsort(ex, ex.get("goal") or {"type": "eq"})
-    ctx = ci._Ctx(sort, env)
+    ctx = ci._Ctx(sort, env, dt, sigs)
 
-    definitions = ex.get("definitions") or []
     defs = ""
     if ci._mentions(source, ("pow",)) or ci._mentions(target, ("pow",)):
         defs += ci._build_pow(definitions, ctx)
@@ -60,6 +73,14 @@ def build_disprove_source(ex: dict, source: dict, target: dict) -> tuple[str, li
 
     n_vars = sorted(v for v, d in env.items() if d == "N")
     q_vars = sorted(v for v, d in env.items() if d == "Q")
+    # A free variable of a non-ℕ datatype (a list, a tree) has no numeric reading, so a
+    # `sat` here could only produce a constructor-term counterexample that
+    # `_usable_witness` must reject anyway (D4). Decline the whole query instead of
+    # emitting one whose only possible witness is unreportable — `unknown`, never a
+    # partial witness attached to `proven_unequal`.
+    if any(d not in ("N", "Q") for d in env.values()):
+        raise _induction_error(
+            f"{dt.name}-sorted variables are only supported in induction mode")
     # A ℕ-tagged variable is read back numerically as `(val n)`; `val` must exist even
     # if the body never coerced one (mirrors build_disprove_source's force_val).
     ctx.need_val = ctx.need_val or bool(n_vars)
@@ -86,7 +107,7 @@ def decide_equivalence(ex: dict, source: dict, target: dict) -> EquivResult:
     try:
         prove_src = build_prove_source(ex, source, target)
         dis_src, labels = build_disprove_source(ex, source, target)
-    except InductionError as e:
+    except ci.InductionError as e:
         return EquivResult("unknown", False, "untranslatable", detail=str(e))
 
     key = hashlib.sha256((prove_src + str(ci.REQUIRE_RECHECK)).encode()).hexdigest()

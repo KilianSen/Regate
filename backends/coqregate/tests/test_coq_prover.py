@@ -335,6 +335,200 @@ def test_grade_bad_protocol_raises():
         pass
 
 
+# --- `apply`: n-ary NAMED function application (protocol 1.1) ---------------
+# A function is DATA: an `apply` node plus two recursive `definitions` rules (one
+# matching `0`, one matching `S k`). Each becomes a Coq `Fixpoint`. Scope: ℕ only.
+def ap(f, *args): return {"type": "apply", "value": f, "slots": {"args": list(args)}}
+
+
+# p and q are the same function under two names, so `p n == q n` is provable by
+# induction with the IH used at `n` itself — the shape coqregate can grade.
+APPLY_DEFS = [drule("p_zero", ap("p", num(0)), num(1)),
+              drule("p_succ", ap("p", succ(wd("k"))), mul(num(2), ap("p", wd("k")))),
+              drule("q_zero", ap("q", num(0)), num(1)),
+              drule("q_succ", ap("q", succ(wd("k"))), mul(num(2), ap("q", wd("k"))))]
+APPLY_GOAL = eq(ap("p", vr("n")), ap("q", vr("n")))
+
+
+def _apply_ex():
+    return {"mode": "induction", "goal": APPLY_GOAL, "inductionVar": "n",
+            "definitions": APPLY_DEFS}
+
+
+def test_apply_emits_a_fixpoint_per_function():
+    src = coq_induction.build_source(_apply_ex())
+    assert "Fixpoint p (n : nat) {struct n} : Q :=" in src
+    assert "Fixpoint q (n : nat) {struct n} : Q :=" in src
+    assert "| S k => (2 * (p (k)%nat))" in src
+    assert "Theorem regate_induction : forall (n : nat), (p (n)%nat) == (q (n)%nat)." in src
+
+
+def test_apply_recursion_argument_may_be_any_position():
+    # `geo(S k, a)` recurses on its FIRST argument — the constructor-matched one,
+    # not "the last" (the cvc5regate contract).
+    defs = [drule("geo_zero", ap("geo", num(0), wd("a")), num(1)),
+            drule("geo_succ", ap("geo", succ(wd("k")), wd("a")),
+                  mul(wd("a"), ap("geo", wd("k"), wd("a"))))]
+    src = coq_induction.build_source(
+        {"mode": "induction", "goal": eq(ap("geo", vr("n"), vr("c")), ap("geo", vr("n"), vr("c"))),
+         "inductionVar": "n", "definitions": defs})
+    assert "Fixpoint geo (n : nat) (a : Q) {struct n} : Q :=" in src
+    assert "| S k => (a * (geo (k)%nat a))" in src
+
+
+def test_apply_base_rule_is_renamed_onto_the_step_rule_binders():
+    # A Coq Fixpoint has ONE parameter name per position across both branches.
+    defs = [drule("f0", ap("f", wd("y"), num(0)), wd("y")),
+            drule("fs", ap("f", wd("x"), succ(wd("m"))), mul(wd("x"), ap("f", wd("x"), wd("m"))))]
+    src = coq_induction.build_source(
+        {"mode": "induction", "goal": eq(ap("f", vr("c"), vr("n")), ap("f", vr("c"), vr("n"))),
+         "inductionVar": "n", "definitions": defs})
+    assert "Fixpoint f (x : Q) (n : nat) {struct n} : Q :=" in src
+    assert "| O => x" in src                      # the base rule's `y` became `x`
+    assert "| S m => (x * (f x (m)%nat))" in src
+
+
+def test_apply_coerces_a_nat_index_used_as_a_value():
+    # `fact (S k) = (S k) * fact k` uses its own ℕ index as a ℚ value: ℕ is not ℚ,
+    # so the emitted file declares a coercion and applies it.
+    defs = [drule("fact_zero", ap("fact", num(0)), num(1)),
+            drule("fact_succ", ap("fact", succ(wd("k"))),
+                  mul(succ(wd("k")), ap("fact", wd("k"))))]
+    src = coq_induction.build_source(
+        {"mode": "induction", "goal": eq(ap("fact", vr("n")), ap("fact", vr("n"))),
+         "inductionVar": "n", "definitions": defs})
+    assert "Fixpoint nq (n : nat) : Q :=" in src
+    assert "| S k => ((nq ((S k))%nat) * (fact (k)%nat))" in src
+
+
+def test_apply_declines_non_structural_recursion():
+    # Coq's termination checker would reject the Fixpoint and take the whole file
+    # with it; decline with a reason instead (-> unknown, never a grade).
+    defs = [drule("g0", ap("g", num(0)), num(1)),
+            drule("gs", ap("g", succ(wd("k"))), ap("g", succ(wd("k"))))]
+    try:
+        coq_induction.build_source(
+            {"mode": "induction", "goal": eq(ap("g", vr("n")), ap("g", vr("n"))),
+             "inductionVar": "n", "definitions": defs})
+        assert False, "expected InductionError"
+    except coq_induction.InductionError as e:
+        assert "structural" in str(e)
+
+
+def test_apply_declines_a_name_that_is_not_an_identifier():
+    # Transmitted names are interpolated into Coq source; they must be identifiers.
+    evil = "bad. Axiom cheat : False"
+    defs = [drule("e0", ap(evil, num(0)), num(1)), drule("es", ap(evil, succ(wd("k"))), num(1))]
+    try:
+        coq_induction.build_source(
+            {"mode": "induction", "goal": eq(ap(evil, vr("n")), num(1)),
+             "inductionVar": "n", "definitions": defs})
+        assert False, "expected InductionError"
+    except coq_induction.InductionError:
+        pass
+
+
+def test_apply_declines_a_non_nat_datatype():
+    # `exercise.datatype` (lists/trees) is a cvc5regate capability; coqregate is ℕ.
+    nil = ap("nil")
+    defs = [drule("len_nil", ap("len", nil), num(0)),
+            drule("len_cons", ap("len", ap("cons", wd("h"), wd("t"))),
+                  add(num(1), ap("len", wd("t"))))]
+    try:
+        coq_induction.build_source(
+            {"mode": "induction", "goal": eq(ap("len", vr("l")), ap("len", vr("l"))),
+             "inductionVar": "l", "definitions": defs})
+        assert False, "expected InductionError"
+    except coq_induction.InductionError:
+        pass
+
+
+def test_apply_pow_path_is_untouched():
+    # The `pow` -> `pw` emitter must not learn any `apply` habits: no coercion, no
+    # generalization, no restricted unfolding.
+    src = coq_induction.build_source(ex(eq(powr(num(1), vr("n")), num(1))))
+    assert "nq" not in src and "revert" not in src and "cbn" not in src
+    assert "{struct" not in src
+
+
+def test_grade_apply_derivation_certified():
+    _install(lambda src: True)                     # kernel backstop certifies the goal
+    e = _apply_ex()
+    base = [{"rule": "p_zero", "path": [0], "result": eq(num(1), ap("q", num(0)))},
+            {"rule": "q_zero", "path": [1], "result": eq(num(1), num(1))}]
+    step = [{"rule": "p_succ", "path": [0],
+             "result": eq(mul(num(2), ap("p", vr("n"))), ap("q", succ(vr("n"))))},
+            {"rule": "q_succ", "path": [1],
+             "result": eq(mul(num(2), ap("p", vr("n"))), mul(num(2), ap("q", vr("n"))))},
+            {"kind": "B", "path": [0, 1], "equation": [ap("p", vr("n")), ap("q", vr("n"))],
+             "result": eq(mul(num(2), ap("q", vr("n"))), mul(num(2), ap("q", vr("n"))))}]
+    resp = grade.grade({"protocol": "1.1", "exercise": e,
+                        "submission": {"base": {"steps": base}, "step": {"steps": step}}})
+    assert resp["outcome"] == "proven_equal" and resp["certified"] and resp["score"] == 100
+    assert "Fixpoint p" in resp["proof"][0]["source"]
+
+
+def test_grade_apply_invalid_step_is_still_invalid():
+    _install(lambda src: True)
+    e = _apply_ex()
+    base = [{"rule": "p_zero", "path": [0], "result": eq(num(2), ap("q", num(0)))}]   # 1, not 2
+    step = [{"rule": "p_succ", "path": [0],
+             "result": eq(mul(num(2), ap("p", vr("n"))), ap("q", succ(vr("n"))))}]
+    resp = grade.grade({"protocol": "1.1", "exercise": e,
+                        "submission": {"base": {"steps": base}, "step": {"steps": step}}})
+    assert resp["outcome"] == "invalid_derivation" and resp["score"] == 0
+
+
+def test_grade_apply_generalized_ih_is_unknown_not_invalid():
+    # `fact_aux x (S k) = fact_aux (x·(S k)) k` needs the IH at a SHIFTED
+    # accumulator. The emitted Coq proof generalizes the IH, but this backend's
+    # step checker only recognises it at the induction variable — so the honest
+    # answer is `unknown`. Grading it `invalid_derivation` is the false negative
+    # milestone M1 fixed; it must not come back through the `apply` door.
+    _install(lambda src: True)
+    defs = [drule("fa0", ap("fa", wd("x"), num(0)), wd("x")),
+            drule("fas", ap("fa", wd("x"), succ(wd("k"))),
+                  ap("fa", mul(wd("x"), succ(wd("k"))), wd("k"))),
+            drule("ft0", ap("ft", num(0)), num(1)),
+            drule("fts", ap("ft", succ(wd("k"))), mul(succ(wd("k")), ap("ft", wd("k"))))]
+    goal = eq(ap("fa", vr("x"), vr("n")), mul(vr("x"), ap("ft", vr("n"))))
+    e = {"mode": "induction", "goal": goal, "inductionVar": "n", "definitions": defs}
+    shifted = ap("fa", mul(vr("x"), succ(vr("n"))), vr("n"))
+    step = [{"rule": "fas", "path": [0], "result": eq(shifted, mul(vr("x"), ap("ft", succ(vr("n")))))},
+            {"kind": "B", "path": [0],
+             "equation": [shifted, mul(mul(vr("x"), succ(vr("n"))), ap("ft", vr("n")))],
+             "result": eq(mul(mul(vr("x"), succ(vr("n"))), ap("ft", vr("n"))),
+                          mul(vr("x"), ap("ft", succ(vr("n")))))}]
+    # A COMPLETE base case, so the only thing standing between this submission and a
+    # verdict is the shifted IH.
+    e["ruleset"] = [{"id": "mul_one_right", "lhs": mul(wd("a"), num(1)), "rhs": wd("a"),
+                     "bidirectional": False, "conditions": []}]
+    base = [{"rule": "fa0", "path": [0], "result": eq(vr("x"), mul(vr("x"), ap("ft", num(0))))},
+            {"rule": "ft0", "path": [1, 1], "result": eq(vr("x"), mul(vr("x"), num(1)))},
+            {"rule": "mul_one_right", "path": [1], "result": eq(vr("x"), vr("x"))}]
+    resp = grade.grade({"protocol": "1.1", "exercise": e,
+                        "submission": {"base": {"steps": base}, "step": {"steps": step}}})
+    assert resp["outcome"] == "unknown" and resp["score"] is None and not resp["certified"]
+    assert resp["meta"]["induction"]["status"] == "uncertifiable"
+
+
+def test_grade_apply_untranslatable_is_unknown_not_invalid():
+    # A list goal (non-ℕ datatype) with a NON-EMPTY submission: the strict step
+    # checker must never run on a goal we cannot translate.
+    _install(lambda src: True)
+    nil = ap("nil")
+    defs = [drule("len_nil", ap("len", nil), num(0)),
+            drule("len_cons", ap("len", ap("cons", wd("h"), wd("t"))),
+                  add(num(1), ap("len", wd("t"))))]
+    e = {"mode": "induction", "goal": eq(ap("len", vr("l")), ap("len", vr("l"))),
+         "inductionVar": "l", "definitions": defs}
+    junk = [{"rule": "len_nil", "path": [0], "result": eq(num(0), num(0))}]
+    resp = grade.grade({"protocol": "1.1", "exercise": e,
+                        "submission": {"base": {"steps": junk}, "step": {"steps": junk}}})
+    assert resp["outcome"] == "unknown" and resp["score"] is None
+    assert resp["meta"]["induction"]["status"] == "untranslatable"
+
+
 def _run_all():
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     for fn in fns:

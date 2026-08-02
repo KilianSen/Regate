@@ -5,6 +5,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import cvc5_equiv
 import cvc5_induction
 import cvc5_prover
 import grade
@@ -522,6 +523,98 @@ def test_grade_bad_protocol_raises():
         assert False
     except grade.RequestError:
         pass
+
+
+# --- non-recursive named operators (the `apply` escape hatch) ----------------
+# A host adds an ordinary binary/n-ary operator as DATA — an `apply` node plus a
+# single defining equation — instead of a new MathNode type wired into the backend.
+# Such a definition has no constructor pattern, so it is emitted as a plain
+# (non-recursive) `define-fun`: a definitional extension, strictly safer than the
+# `define-fun-rec` axiom a recursive definition emits.
+_DBL = [rule("dbl_def", app("dbl", wd("a")), mul(num(2), wd("a")))]
+_DBL_GOAL = {"mode": "induction", "goal": eq(app("dbl", vr("n")), add(vr("n"), vr("n"))),
+             "inductionVar": "n", "definitions": _DBL}
+
+
+def test_nonrecursive_operator_becomes_a_plain_define_fun():
+    src = cvc5_induction.build_prove_source(_DBL_GOAL)
+    assert "(define-fun dbl ((a Real)) Real" in src
+    assert "define-fun-rec dbl" not in src           # no recursion axiom for a macro
+    assert "(dbl (to_real (val n)))" in src          # the ℕ induction var is coerced
+
+
+def test_nonrecursive_operator_translates_in_equational_mode():
+    # The same operator in a plain transformation/equation exercise: both the prove
+    # and the disprove query must carry the definition and type every argument
+    # numerically (the old legacy-ℕ guess typed the LAST argument as a ℕ).
+    avg = [rule("avg_def", app("avg", wd("a"), wd("b")),
+                {"type": "frac", "slots": {"numerator": [add(wd("a"), wd("b"))],
+                                           "denominator": [num(2)]}})]
+    ex = {"definitions": avg}
+    src = cvc5_equiv.build_prove_source(ex, app("avg", vr("x"), vr("x")), vr("x"))
+    assert "(define-fun avg ((a Real) (b Real)) Real" in src
+    assert "(forall ((x Real))" in src
+    dis, labels = cvc5_equiv.build_disprove_source(ex, app("avg", vr("x"), vr("y")), vr("x"))
+    assert "(declare-const x Real)" in dis and "(declare-const y Real)" in dis
+    assert labels == ["x", "y"]
+
+
+def test_nonrecursive_definition_may_not_recurse():
+    bad = [rule("f_def", app("f", wd("a")), add(num(1), app("f", wd("a"))))]
+    _expect_induction_error({**_DBL_GOAL, "definitions": bad,
+                             "goal": eq(app("f", vr("n")), vr("n"))}, "calls itself")
+
+
+def test_one_function_may_not_mix_plain_and_constructor_rules():
+    bad = SUM + [rule("sum_any", app("sum", wd("m")), num(0))]
+    _expect_induction_error({"mode": "induction", "goal": eq(app("sum", vr("n")), num(0)),
+                             "inductionVar": "n", "definitions": bad}, "mixes constructor rules")
+
+
+def test_two_nonrecursive_equations_are_declined():
+    bad = [rule("f1", app("f", wd("a")), wd("a")), rule("f2", app("f", wd("b")), num(0))]
+    _expect_induction_error({"mode": "induction", "goal": eq(app("f", vr("n")), vr("n")),
+                             "inductionVar": "n", "definitions": bad},
+                            "exactly one defining equation")
+
+
+def test_base_and_step_rules_must_name_shared_parameters_alike():
+    # The emitted parameters come from the step rule; a base rule calling the
+    # accumulator something else would leave an unbound symbol in the base branch.
+    bad = [rule("k0", app("kk", wd("y"), num(0)), wd("y")),
+           rule("ks", app("kk", wd("x"), succ(wd("m"))),
+                app("kk", mul(wd("x"), succ(wd("m"))), wd("m")))]
+    _expect_induction_error({"mode": "induction", "goal": eq(app("kk", vr("x"), vr("n")), vr("x")),
+                             "inductionVar": "n", "definitions": bad}, "use one name in both rules")
+
+
+def _expect_induction_error(ex, fragment):
+    try:
+        cvc5_induction.build_prove_source(ex)
+        assert False, f"expected InductionError containing {fragment!r}"
+    except cvc5_induction.InductionError as e:
+        assert fragment in str(e), str(e)
+
+
+def test_undefined_nullary_apply_is_unknown_not_a_crash():
+    # Regression: an `apply` with no arguments and no definition hit the legacy-ℕ
+    # `args[-1]` and raised an uncaught IndexError — HTTP 500 / CLI exit 1, which the
+    # protocol forbids. It must decline as `unknown` instead.
+    _install(lambda s, a: ("unknown", ""))
+    resp = grade.grade({"protocol": "1.1",
+                        "exercise": {"mode": "transformation", "source": app("e"), "target": num(1)},
+                        "submission": {"final": app("e")}})
+    assert resp["outcome"] == "unknown" and resp["score"] is None
+
+
+def test_rule_verification_binds_datatype_variables():
+    # verify_rules over a list exercise: the rule's `t : Lst` variable must be
+    # quantified at the datatype sort. It used to be dropped (unbound symbol → an
+    # unprovable file → a false "unproven"), and a nullary `nil` crashed outright.
+    src = cvc5_induction.build_rule_source(_SUML[1], _LST_GOAL)
+    assert "(t Lst)" in src and "define-fun-rec summa" in src
+    ground = cvc5_induction.build_rule_source(_SUML[0], _LST_GOAL)
+    assert "(assert (not (= (summa nil) 0)))" in ground
 
 
 # --- real-solver tests (gated on a cvc5 binary) ------------------------------

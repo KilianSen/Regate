@@ -29,6 +29,27 @@ def ex(goal):
     return {"mode": "induction", "goal": goal, "inductionVar": "n", "definitions": DEFS}
 
 
+# `apply` — n-ary NAMED function application (protocol 1.1). The function is DATA:
+# two transmitted `definitions` rules (base + `succ` step) per function, which
+# lean_induction compiles to a structurally-recursive Lean `def`.
+def apply_(name, *args): return {"type": "apply", "value": name, "slots": {"args": list(args)}}
+
+
+APPLY_DEFS = [
+    rule("s_zero", apply_("s", num(0)), num(0)),
+    rule("s_succ", apply_("s", succ(wd("k"))), add(succ(wd("k")), apply_("s", wd("k")))),
+    rule("factaux_zero", apply_("fact_aux", wd("x"), num(0)), wd("x")),
+    rule("factaux_succ", apply_("fact_aux", wd("x"), succ(wd("k"))),
+         apply_("fact_aux", mul(wd("x"), succ(wd("k"))), wd("k"))),
+    rule("fact_zero", apply_("fact", num(0)), num(1)),
+    rule("fact_succ", apply_("fact", succ(wd("k"))), mul(succ(wd("k")), apply_("fact", wd("k")))),
+]
+
+
+def apply_ex(goal):
+    return {"mode": "induction", "goal": goal, "inductionVar": "n", "definitions": APPLY_DEFS}
+
+
 # Goals whose emitted proof MUST kernel-check (CI fails otherwise).
 # All three verified against Lean 4.15 + Mathlib.
 MUST_PASS = [
@@ -42,7 +63,19 @@ MUST_PASS = [
     ("2^n = 2^n", ex(eq(powr(num(2), vr("n")), powr(num(2), vr("n"))))),
 ]
 # Exploratory — logged, never fatal (promote to MUST_PASS once confirmed in CI).
-BEST_EFFORT: list = []
+# The `apply` goals: the emitted `def`s and the `generalizing`/`push_cast` tactic
+# alternatives were hand-checked but NOT kernel-checked (the authoring box has no
+# Lean). CI has the toolchain — promote whichever of these it reports `ok`.
+BEST_EFFORT: list = [
+    # accumulator/generalized IH: needs `induction n generalizing x`
+    ("fact_aux x n = x * fact n",
+     apply_ex(eq(apply_("fact_aux", vr("x"), vr("n")), mul(vr("x"), apply_("fact", vr("n")))))),
+    # a ℕ induction variable used numerically: needs the `(n : ℚ)` cast + push_cast
+    ("2 * s n = n * (n+1)",
+     apply_ex(eq(mul(num(2), apply_("s", vr("n"))), mul(vr("n"), add(vr("n"), num(1)))))),
+    # IH-free: the recursive def unfolds and closes by `simp` alone
+    ("s n = s n", apply_ex(eq(apply_("s", vr("n")), apply_("s", vr("n"))))),
+]
 
 
 def main() -> int:

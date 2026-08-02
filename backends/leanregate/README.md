@@ -40,10 +40,21 @@ never a false grade.
   inconclusive, never a false grade (the protocol's contract).
 - `lean_induction.py` — proof by induction over `ℕ` (`mode: "induction"`). The
   student's **base** and **inductive-step** derivations are certified by
-  `lean_check.check_induction` (the step may substitute the hypothesis `P(k)`);
-  only then does a Lean `induction` (Nat.rec) kernel run backstop the `∀n. P(n)`
-  leap and guard against inconsistent transmitted `definitions`. An empty or
-  wrong proof is never certified.
+  `lean_check.check_induction` (the step may substitute the hypothesis `P(k)`,
+  at a *shifted accumulator* if the goal has one — the emitted proof generalizes
+  the accumulators before inducting); only then does a Lean `induction` (Nat.rec)
+  kernel run backstop the `∀n. P(n)` leap and guard against inconsistent
+  transmitted `definitions`. An empty or wrong proof is never certified.
+  **Recursive functions travel as data**: both the `pow` node and the `apply` node
+  (n-ary *named* function application, protocol 1.1) are compiled from the
+  transmitted `definitions` — a base rule `f(…, 0, …)` and a step rule
+  `f(…, succ k, …)` recursing on that argument, at any position — into a
+  structurally-recursive Lean `def`. A host adds a new operator by transmitting
+  its two definition rules; no backend code changes. Lean admits the `def` only if
+  its equation compiler proves it terminating, so a bogus "definition" is a compile
+  error (`unknown`), never a route to a false certificate. Out of scope and
+  declined as `unknown`: `exercise.datatype` (list/tree induction), a function in a
+  ℕ position, mutual recursion, and ℕ-truncated subtraction.
 
 ## Trust model
 

@@ -323,27 +323,38 @@ def check_case(source: dict, steps: list[dict], rules: dict[str, Rule],
                 return CaseReport("invalid", None, f"step {i}: path {list(path)} is not in the expression")
             # Each IH is generalized over its accumulators (wildcarded by
             # grade_derivation). Recover the instance σ the student applies by matching
-            # an IH's LHS against the target subterm; a pure-ℕ IH has no wildcards, so
-            # this reduces to the old exact match. Try every available IH and accept the
-            # first whose instance equals the student's declared `equation` — a tree
+            # one side of an IH against the target subterm; a pure-ℕ IH has no wildcards,
+            # so this reduces to the old exact match. Try every available IH and accept
+            # the first whose instance equals the student's declared `equation` — a tree
             # step applies P(l) then P(r) at different subterms. Sound because cvc5
             # certifies the *co-quantified* goal, the same universal each IH claims.
             eqn = step.get("equation")
             if not (isinstance(eqn, list) and len(eqn) == 2):
                 return CaseReport("invalid", None, f"step {i}: kind-B step needs an [lhs, rhs] equation")
-            ih_rhs = None
+            # An IH is an *equation*, so it licenses a substitution in either direction: forward
+            # rewrites `P.lhs·σ` to `P.rhs·σ`, reverse folds `P.rhs·σ` back into `P.lhs·σ`. Both are
+            # instances of the same co-quantified universal cvc5 certifies, so admitting the reverse
+            # adds no proving strength — it only lets a derivation *introduce* a recursive call
+            # (fold `nodes l + nodes r` into `aux r (nodes l)`), which accumulator proofs need and
+            # which the forward-only matcher made unreachable. The declared `equation` is always
+            # (pre-rewrite, post-rewrite), so it pins the direction taken and is re-checked below;
+            # forward is tried first, leaving every previously accepted derivation accepted.
+            replacement = None
             for h in ihs:
-                sigma = _match(h[0], target, {}, ac)
-                if sigma is None or not _wild_names(h[1]) <= set(sigma):
-                    continue
-                cand_lhs, cand_rhs = instantiate(h[0], sigma), instantiate(h[1], sigma)
-                if ac_equal(eqn[0], cand_lhs, ac) and ac_equal(eqn[1], cand_rhs, ac):
-                    ih_rhs = cand_rhs
+                for pattern, template in ((h[0], h[1]), (h[1], h[0])):
+                    sigma = _match(pattern, target, {}, ac)
+                    if sigma is None or not _wild_names(template) <= set(sigma):
+                        continue
+                    cand_from, cand_to = instantiate(pattern, sigma), instantiate(template, sigma)
+                    if ac_equal(eqn[0], cand_from, ac) and ac_equal(eqn[1], cand_to, ac):
+                        replacement = cand_to
+                        break
+                if replacement is not None:
                     break
-            if ih_rhs is None:
+            if replacement is None:
                 return CaseReport("invalid", None,
                                   f"step {i}: substitution is not an instance of the inductive hypothesis")
-            result = replace(state, path, copy.deepcopy(ih_rhs))
+            result = replace(state, path, copy.deepcopy(replacement))
             claimed = step.get("result")
             if claimed is not None and not ac_equal(claimed, result, ac):
                 return CaseReport("invalid", None, f"step {i}: claimed result does not match the IH substitution")

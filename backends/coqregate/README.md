@@ -51,6 +51,27 @@ structural induction over ℕ, the induction variable an exponent, and `pow`
 defined by its `0` / `succ` rules. Anything else ⇒ `unknown`. Verified end-to-end
 on **Rocq 9.1.1** for `1^n = 1`, `a^(m+n) = a^m·a^n`, and `a^n·b^n = (a·b)^n`.
 
+### `apply` — named function application (protocol 1.1)
+
+Also supported: the `apply` node, so a host can add a new n-ary operator as
+**data** — an `apply` node plus two recursive `definitions` rules — instead of a
+new MathNode type wired into every backend. A function is defined by exactly two
+transmitted rules, one matching the ℕ base constructor `0` and one matching the
+step constructor `S k`, recursing on the constructor-matched argument **at any
+position** (`fact_aux(x, S k)` recurses on its second, `sum(S k)` on its first).
+Each becomes one Coq `Fixpoint … {struct n}` with a two-branch `match`, emitted in
+dependency order; a ℕ index used as a ℚ *value* (`fact (S k) = (S k)·fact k`) goes
+through an emitted ℕ→ℚ coercion, and the proof `revert`s the ℚ binders so the
+inductive hypothesis is generalized over them.
+
+**ℕ only.** `exercise.datatype` (lists, trees) is not implemented: a definition
+that matches a non-ℕ constructor, a non-structural recursive call, mutual
+recursion, or a function name that is not a Coq identifier is declined
+(`untranslatable` ⇒ `unknown`), never graded. A derivation that instantiates the
+IH at a *shifted accumulator* is likewise declined — the emitted Coq proof
+generalizes the IH, but `step_check` here recognises it only at the induction
+variable, and half-checking a derivation would be a false `invalid_derivation`.
+
 ### ℚ equality: `==` (Qeq), not Leibniz `=`
 
 Coq's rationals are `QArith`'s `Q` (numerator `#` denominator). Two `Q` that
