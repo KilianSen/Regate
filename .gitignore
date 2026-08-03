@@ -8,7 +8,10 @@ __pycache__/
 # Lean
 backends/leanregate/.lake/
 backends/leanregate/build/
-backends/leanregate/lake-manifest.json
+# lake-manifest.json is deliberately TRACKED: `leanprover/lean-action` refuses to
+# configure without it ("No lake-manifest.json found"), which failed the leanregate
+# job on every run. It also pins the exact Mathlib revision, so CI resolves the same
+# dependencies the emitter was verified against instead of whatever is newest.
 backends/leanregate/Regate/        # runtime scratch: lean_prover/check_induction write proofs here
 
 # IDE / OS

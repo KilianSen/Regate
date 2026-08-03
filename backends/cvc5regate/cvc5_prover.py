@@ -15,10 +15,13 @@ def _find_cvc5() -> str:
     """Locate the cvc5 binary: CVC5REGATE_CVC5, then PATH, then this
     interpreter's own environment.
 
-    The `cvc5` wheel installs a real binary into <prefix>/bin, which is on PATH
-    only while the virtualenv is activated. Without this fallback, running under
-    an unactivated venv (a service, a bare `.venv/bin/python`) leaves cvc5
-    unfindable and every goal degrades silently to `unknown`.
+    The prefix scan catches a binary someone placed in the venv's `bin/` (an
+    unactivated venv — a service, a bare `.venv/bin/python` — leaves it off PATH,
+    and every goal would then degrade silently to `unknown`).
+
+    Note the `cvc5` PyPI wheel does NOT provide one: it ships the Python bindings
+    only, with no `bin/`, no `.data/scripts/` and no entry points. Install the
+    static binary from the cvc5 releases instead (that is what CI does).
     """
     explicit = os.environ.get("CVC5REGATE_CVC5")
     if explicit:
