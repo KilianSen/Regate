@@ -197,10 +197,34 @@ def _grade_equational(ex: dict, sub: dict) -> dict:
                                           "trusted/proven rule and it reaches the target form.")
             # valid but unfinished → grade the endpoint the student reached.
         else:
-            # Uncertifiable (unknown/unproven/guarded rule, or a Leibniz step): fall back
-            # to the SMT oracle on the claimed final. Honest — the path is not certified,
-            # but the endpoint's equivalence is an independent, checkable fact.
-            final = sub["steps"][-1].get("result")
+            # Uncertifiable: this backend cannot LICENSE these steps — a Type-B/Leibniz
+            # substitution, a guarded rule with no discharging assumption, or an unproven
+            # lemma. It may still DISPROVE the claimed endpoint: a counterexample is a fact
+            # about expressions and is sound whatever the step licences were. What it must
+            # not do is award credit.
+            #
+            # This used to set `final = sub["steps"][-1].get("result")` and fall through to
+            # endpoint grading unconditionally, so an unlicensed step whose claimed result
+            # equalled the target scored proven_equal / 100 / certified — fixtures 14
+            # (assumption-missing), 16 (leibniz-no-hypothesis) and 18 (broken-lemma) all did,
+            # where eggregate returns invalid_derivation. Trivially exploitable: assert the
+            # target as your step result and cite anything. GRADING_PROTOCOL §4.5.2 says a
+            # backend that cannot model the request declines; it does not answer an easier one.
+            claimed = sub["steps"][-1].get("result")
+            if claimed is not None and mode == "transformation" and target is not None:
+                _validate_node(claimed, "submission.steps[-1].result")
+                v = cvc5_equiv.decide_equivalence(ex, claimed, target)
+                if v.outcome == "proven_unequal" and v.witness:
+                    return _envelope("proven_unequal", 0, True, witness=v.witness,
+                                     steps=steps_out,
+                                     meta={**meta, "equiv": {"method": v.method,
+                                                             "rechecked": v.rechecked}},
+                                     feedback="The derivation could not be certified, and the "
+                                              "expression you reached is not equivalent to the "
+                                              "goal (cvc5 found a counterexample).")
+            return _envelope("unknown", None, False, steps=steps_out, meta=meta,
+                             feedback=("the derivation uses a step this backend cannot license "
+                                       f"({report.reason}); route to review."))
 
     # 2) Endpoint equivalence via the cvc5 oracle.
     if final is None:
@@ -245,6 +269,12 @@ def _equiv_proof(v: cvc5_equiv.EquivResult) -> list:
 
 def _grade_transformation_endpoint(ex, source, final, target, ac, partial, steps_out, meta) -> dict:
     if step_check.ac_equal(final, target, ac):
+        # Endpoint grading, no solver: the exercise author warrants that `source` and `target`
+        # are equivalent, so a `final` matching the target is credited on that warrant. Weak by
+        # construction — the target is visible to the student — which is why the STEP path above
+        # is the one that must not be bypassed, and why an unlicensed derivation now declines
+        # rather than falling through to here. A malformed exercise (source NOT equivalent to
+        # target) will still be credited here; that is the author's error, not the student's.
         return _envelope("proven_equal", 100, True, proof=[], steps=steps_out, meta=meta,
                          feedback="Reached the target form.")
     v = cvc5_equiv.decide_equivalence(ex, final, target)

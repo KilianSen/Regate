@@ -162,8 +162,10 @@
       "score": 100
     },
     "cvc5regate": {
-      "outcome": "proven_equal",
-      "score": 100
+      "outcome": "unknown",
+      "score": null,
+      "certified": false
     }
-  }
+  },
+  "description": " cvc5regate expects `unknown`: the ruleset travels here as `exercise.rules` (a catalogue reference) and cvc5regate has NO built-in catalogue, so it cannot resolve the cited rules and cannot license the derivation. Per GRADING_PROTOCOL \u00a74.5.2 it declines rather than deciding. It previously answered proven_equal/100 via the endpoint short-circuit \u2014 the same unsound path that scored fixtures 14/16/18 at 100 on derivations eggregate rejects; the answer happened to be correct here, the reasoning did not."
 }
