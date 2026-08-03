@@ -34,6 +34,11 @@ SUM = [rule("sum_zero", app("sum", num(0)), num(0)),
 
 POW_GOAL = {"mode": "induction", "goal": eq(powr(num(1), vr("n")), num(1)),
             "inductionVar": "n", "definitions": POW}
+# `1^n = 2` is false for EVERY n, so any reported point is a genuine counterexample.
+# Disprove tests must not stub a witness against a true goal (POW_GOAL): the witness
+# re-evaluation rejects such a point, and rightly so — no sound solver produces one.
+FALSE_POW_GOAL = {"mode": "induction", "goal": eq(powr(num(1), vr("n")), num(2)),
+                  "inductionVar": "n", "definitions": POW}
 DIV_GOAL = {"mode": "induction", "domain": "int",
             "goal": divides(3, sub(mul(vr("n"), mul(vr("n"), vr("n"))), vr("n"))),
             "inductionVar": "n", "definitions": []}
@@ -89,7 +94,9 @@ def test_translate_recursive_sum():
 def test_disprove_source_has_free_const_and_getvalue():
     src, labels = cvc5_induction.build_disprove_source(POW_GOAL)
     assert "(declare-const n Nat)" in src
-    assert "(check-sat)" in src and "(get-value ((val n)))" in src
+    # The witness is read from `n` itself, NOT `(val n)`: under --fmf-fun the model's
+    # interpretation of the recursive `val` can disagree with the datatype it chose.
+    assert "(check-sat)" in src and "(get-value (n))" in src
     assert labels == ["n"]
 
 
@@ -129,7 +136,7 @@ def test_sat_with_model_is_proven_unequal_with_witness():
             return "sat", "sat\n(((val n) 2))"
         return "unsat", ""
     _install(respond)
-    res = cvc5_induction.certify(POW_GOAL)
+    res = cvc5_induction.certify(FALSE_POW_GOAL)
     assert res.outcome == "proven_unequal" and res.witness == {"n": "2"}
     assert not res.certified
 
@@ -177,8 +184,9 @@ def _sub(base, step):
             "step": {"steps": [dict(s) for s in step]}}
 
 
-def _ind_req(submission, ruleset=RULESET):
-    e = {**POW_GOAL, "ruleset": ruleset} if ruleset is not None else POW_GOAL
+def _ind_req(submission, ruleset=RULESET, exercise=None):
+    base = exercise or POW_GOAL
+    e = {**base, "ruleset": ruleset} if ruleset is not None else base
     return {"protocol": "1.0", "exercise": e, "submission": submission}
 
 
@@ -427,7 +435,7 @@ def test_false_goal_returns_proven_unequal_with_witness():
             return ("sat", "sat\n(((val n) 0))")    # counterexample at n = 0
         return ("unsat", "")
     _install(respond)
-    resp = grade.grade(_ind_req(_sub(VALID_BASE, VALID_STEP)))
+    resp = grade.grade(_ind_req(_sub(VALID_BASE, VALID_STEP), exercise=FALSE_POW_GOAL))
     assert resp["outcome"] == "proven_unequal" and resp["score"] == 0
     assert resp["witness"] == {"n": "0"}            # protocol: a witness is mandatory here
 
@@ -444,7 +452,7 @@ def test_false_goal_is_refuted_before_a_garbage_derivation():
     _install(respond)
     garbage = [{"rule": "pow_zero", "path": [0],
                 "result": eq(num(9), num(9))}]       # claimed result is not what pow_zero yields
-    resp = grade.grade(_ind_req(_sub(garbage, garbage)))
+    resp = grade.grade(_ind_req(_sub(garbage, garbage), exercise=FALSE_POW_GOAL))
     assert resp["outcome"] == "proven_unequal" and resp["witness"] == {"n": "0"}
 
 
@@ -476,11 +484,30 @@ def test_grade_induction_unknown_when_backstop_fails():
 
 def test_certify_disproves_with_witness():
     # The disprove path stays on the certify() oracle: a false goal -> a witness.
+    # The goal must be GENUINELY false at the reported point: `2^n = n+1` fails at
+    # n=2 (4 != 3). This fixture used to use POW_GOAL (`1^n = 1`, true for every n)
+    # with a fabricated n=2 witness — a scenario no sound solver can produce, and one
+    # the witness re-evaluation now rejects (see the test below).
     def respond(s, a):
         return ("sat", "sat\n(((val n) 2))") if "--fmf-fun" in a else ("unsat", "")
     _install(respond)
-    res = cvc5_induction.certify(POW_GOAL)
+    false_goal = {"mode": "induction", "domain": "int",
+                  "goal": eq(powr(num(2), vr("n")), add(vr("n"), num(1))),
+                  "inductionVar": "n", "definitions": POW}
+    res = cvc5_induction.certify(false_goal)
     assert res.outcome == "proven_unequal" and res.witness == {"n": "2"}
+
+
+def test_a_witness_that_does_not_falsify_the_goal_degrades_to_unknown():
+    # A `--fmf-fun` model can name the wrong point (its interpretation of a recursive
+    # function is an approximation), so a sound `sat` can still carry a misleading
+    # witness. `1^n = 1` HOLDS at n=2, so the claimed counterexample is bogus: report
+    # `unknown` rather than telling a student their correct answer fails at n=2.
+    def respond(s, a):
+        return ("sat", "sat\n(((val n) 2))") if "--fmf-fun" in a else ("unknown", "")
+    _install(respond)
+    res = cvc5_induction.certify(POW_GOAL)
+    assert res.outcome == "unknown" and res.witness is None, res
 
 
 def test_ac_matching_commutative():
@@ -643,6 +670,37 @@ def test_real_cvc5_end_to_end():
                   "inductionVar": "n", "definitions": POW}
     r = cvc5_induction.certify(false_goal)
     assert r.outcome == "proven_unequal" and r.witness, r
+
+
+def test_model_value_parser_reads_rationals_and_constructor_terms():
+    # The old regex could only read atoms: a rational silently DROPPED the variable
+    # from the witness, and a datatype constant was unreadable. Both are now parsed.
+    pv = cvc5_prover._parse_values
+    assert pv("sat\n((x (/ 1 2)))") == {"x": "1/2"}
+    assert pv("sat\n((x (- (/ 1 2))))") == {"x": "-1/2"}
+    assert pv("sat\n((x (- 3)))") == {"x": "-3"}
+    # ℕ constructor terms are counted structurally — this is what replaces `(val n)`.
+    assert pv("sat\n((n zero))") == {"n": "0"}
+    assert pv("sat\n((n (succ (succ zero))))") == {"n": "2"}
+    # A non-numeric constructor term stays raw so D4 can reject it as unreportable.
+    assert pv("sat\n((l (cons (- 1) nil)))") == {"l": "(cons (- 1) nil)"}
+    assert pv("sat\n((a 5) (n 2))") == {"a": "5", "n": "2"}
+
+
+def test_rational_witness_survives_into_the_witness_dict():
+    # Regression for the silent drop: previously `(/ 1 2)` matched nothing, so `x`
+    # vanished and the witness came back without it.
+    _install(lambda s, a: ("sat", "sat\n((x (/ 1 2)))"))
+    res = cvc5_prover.disprove("(check-sat)", ["x"])
+    assert res.witness == {"x": "1/2"}
+
+
+def test_nat_witness_is_read_from_the_datatype_constant():
+    # The `val n` misread: a model with n = (succ zero) must report n = 1, whatever
+    # an approximated `(val n)` would have said.
+    _install(lambda s, a: ("sat", "sat\n((n (succ zero)))"))
+    res = cvc5_prover.disprove("(check-sat)", ["n"])
+    assert res.witness == {"n": "1"}
 
 
 def _run_all():

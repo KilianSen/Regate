@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass
+from fractions import Fraction
 
 
 def _find_cvc5() -> str:
@@ -229,17 +230,76 @@ def prove_equiv(prove_source: str, want_certificate: bool = True) -> SolveResult
     return res
 
 
-# cvc5 reports a numeric model value as e.g. `(((val n) 2))` or `((x (- 3)))`.
-_VALUE_RE = re.compile(r"\(\s*(\([^()]*\)|[^()\s]+)\s+(\(-\s*\d+\)|-?\d+(?:\.\d+)?|[^()\s]+)\s*\)")
+# cvc5 reports model values as `(((val n) 2))`, `((x (- 3)))`, `((x (/ 1 2)))`, or —
+# for a datatype-sorted constant — a constructor term like `((n (succ zero)))`. The
+# previous regex could only read atoms, so a rational silently dropped the variable
+# from the witness and a constructor term was unreadable. Parse s-expressions instead.
+def _sexprs(text: str) -> list:
+    """Read `text` into nested lists of atoms. Unbalanced input yields what parsed."""
+    tokens = text.replace("(", " ( ").replace(")", " ) ").split()
+    stack: list[list] = [[]]
+    for tok in tokens:
+        if tok == "(":
+            stack.append([])
+        elif tok == ")":
+            if len(stack) == 1:
+                continue
+            done = stack.pop()
+            stack[-1].append(done)
+        else:
+            stack[-1].append(tok)
+    return stack[0]
+
+
+def _render(node) -> str:
+    return node if isinstance(node, str) else "(" + " ".join(_render(n) for n in node) + ")"
+
+
+def _as_number(node) -> str | None:
+    """A model value as an exact numeric string, or None if it is not numeric.
+
+    Handles `(- 3)`, `(/ 1 2)`, `(- (/ 1 2))`, and ℕ constructor terms (`zero`,
+    `(succ (succ zero))` -> `2`). A non-numeric constructor term such as
+    `(cons 5 nil)` returns None, so D4 still degrades it to `unknown`."""
+    if isinstance(node, str):
+        if node == "zero":
+            return "0"
+        try:
+            Fraction(node)
+            return node
+        except (ValueError, ZeroDivisionError):
+            return None
+    if len(node) == 2 and node[0] == "-":
+        inner = _as_number(node[1])
+        return None if inner is None else str(-Fraction(inner))
+    if len(node) == 2 and node[0] == "succ":
+        inner = _as_number(node[1])
+        if inner is None:
+            return None
+        v = Fraction(inner)
+        return None if v.denominator != 1 or v < 0 else str(v + 1)
+    if len(node) == 3 and node[0] == "/":
+        a, b = _as_number(node[1]), _as_number(node[2])
+        if a is None or b is None or Fraction(b) == 0:
+            return None
+        return str(Fraction(a) / Fraction(b))
+    return None
 
 
 def _parse_values(detail: str) -> dict:
-    """Pull `(get-value …)` pairs out of cvc5 output into {label: value}."""
+    """Pull `(get-value …)` pairs out of cvc5 output into {label: value}.
+
+    Values that are not numeric are kept in raw s-expression form so the caller can
+    see what came back; `_usable_witness` rejects them (they are not reportable as a
+    numeric counterexample), which is the D4 fail-safe."""
     out: dict[str, str] = {}
-    for m in _VALUE_RE.finditer(detail):
-        label, value = m.group(1).strip(), m.group(2).strip()
-        value = re.sub(r"\(-\s*(\d+)\)", r"-\1", value)   # (- 3) -> -3
-        out[label] = value
+    for top in _sexprs(detail):
+        if not isinstance(top, list):
+            continue
+        for pair in top:
+            if isinstance(pair, list) and len(pair) == 2:
+                num = _as_number(pair[1])
+                out[_render(pair[0])] = num if num is not None else _render(pair[1])
     return out
 
 
@@ -261,9 +321,13 @@ def disprove(disprove_source: str, value_labels: list[str]) -> SolveResult:
         # with the `(val n)` key and clobber its own value.
         witness: dict[str, str] = {}
         for lbl in value_labels:
-            for k, v in values.items():
-                if k == lbl or k == f"(val {lbl})":
-                    witness[lbl] = v
+            # Prefer the bare name — the datatype constant read straight out of the
+            # model. `(val n)` is only still honoured so an older query shape (or a
+            # stubbed solver emitting one) keeps working.
+            if lbl in values:
+                witness[lbl] = values[lbl]
+            elif f"(val {lbl})" in values:
+                witness[lbl] = values[f"(val {lbl})"]
         res.witness = witness or values or None
     _CACHE[key] = res
     return res

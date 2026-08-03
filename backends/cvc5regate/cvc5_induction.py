@@ -729,13 +729,15 @@ def build_disprove_source(ex: dict) -> tuple[str, list[str]]:
     decls = [f"(declare-const {v} {sort})" for v in num_vars]
     decls.append(f"(declare-const {var} {dt.name})")
     labels = list(num_vars) + [var]
-    # ℕ reads the witness numerically via `val`; a non-ℕ datatype has no numeric
-    # coercion, so the model value is a constructor term (e.g. `(cons 5 nil)`) the
-    # numeric parser cannot read → D4: the witness degrades to empty → `unknown`,
-    # never a `proven_unequal` without a witness.
-    getvals = " ".join(
-        (f"(val {var})" if dt.name == "Nat" else var) if lbl == var else lbl
-        for lbl in labels)
+    # Read the induction variable DIRECTLY, not through `val`. `val` is a
+    # `define-fun-rec`, and under `--fmf-fun` cvc5's interpretation of a recursive
+    # function is an approximation: `(get-value ((val n)))` has been observed
+    # returning 0 for a model whose `n` is `(succ zero)`, i.e. a sound `sat` carrying
+    # a witness that names the wrong point. Asking for `n` itself yields the
+    # constructor term the model actually chose (`zero`, `(succ zero)`, …), which
+    # cvc5_prover reads structurally. A non-ℕ datatype returns a term like
+    # `(cons 5 nil)`, which is not numerically reportable → D4 degrades to `unknown`.
+    getvals = " ".join(labels)
     return (preamble + "\n".join(decls) + "\n" +
             f"(assert (not {goal_bool}))\n"
             "(check-sat)\n"
@@ -1022,9 +1024,80 @@ def _eval_witness(node: dict, values: dict[str, Fraction]) -> Fraction | None:
         if t == "neg":
             v = _eval_witness(s["inner"][0], values)
             return None if v is None else -v
-    except (KeyError, IndexError):
+        if t == "succ":
+            v = _eval_witness(s["inner"][0], values)
+            return None if v is None else v + 1
+        if t == "pow":
+            b = _eval_witness(s["base"][0], values)
+            e = _eval_witness(s["exponent"][0], values)
+            # Only a genuine ℕ exponent is safe: a rational one leaves the field.
+            if b is None or e is None or e.denominator != 1 or e < 0:
+                return None
+            return b ** int(e)
+    except (KeyError, IndexError, OverflowError):
         return None
     return None
+
+
+# Relations, evaluated exactly at the witness point. `apply` is deliberately absent:
+# unfolding a transmitted recursive definition is a second interpreter, and this is a
+# safety check — "cannot evaluate" must answer None, never a guess.
+_REL_EVAL = {
+    "eq": lambda a, b: a == b,
+    "le": lambda a, b: a <= b,
+    "lt": lambda a, b: a < b,
+    "ge": lambda a, b: a >= b,
+    "gt": lambda a, b: a > b,
+}
+
+
+def _eval_goal(goal: dict, values: dict[str, Fraction]) -> bool | None:
+    """Does the goal relation HOLD at this point? `None` when it cannot be decided."""
+    t = (goal or {}).get("type")
+    s = (goal or {}).get("slots") or {}
+    try:
+        if t in _REL_EVAL:
+            a = _eval_witness(s["left"][0], values)
+            b = _eval_witness(s["right"][0], values)
+            return None if a is None or b is None else _REL_EVAL[t](a, b)
+        if t == "divides":
+            d = s["divisor"][0]
+            if d.get("type") != "number":
+                return None
+            v = _eval_witness(s["value"][0], values)
+            if v is None or v.denominator != 1:
+                return None
+            divisor = int(str(d.get("value")))
+            return None if divisor == 0 else int(v) % divisor == 0
+    except (KeyError, IndexError, ValueError):
+        return None
+    return None
+
+
+def witness_falsifies_goal(goal: dict | None, witness: dict | None) -> bool | None:
+    """Independent second opinion on a counterexample: does the goal actually FAIL at
+    the point cvc5 reported?
+
+    Returns `True` (a genuine counterexample), `False` (**the goal holds there — the
+    witness is bogus**), or `None` (outside the exactly-evaluable fragment, so we
+    cannot tell and must not degrade an otherwise-good verdict).
+
+    Why this exists: the witness is read out of a `--fmf-fun` model, whose values for
+    recursively-defined functions are approximations. A model read can therefore name
+    the wrong point while `sat` itself is perfectly sound. Trusting the solver's model
+    to describe its own counterexample is the one place a *correct* verdict can still
+    carry *incorrect* feedback, and a student who checks the reported point and finds
+    the claim holds has been misled. Verify, don't trust."""
+    if not witness:
+        return None
+    values: dict[str, Fraction] = {}
+    for k, v in witness.items():
+        try:
+            values[str(k)] = Fraction(str(v))
+        except (ValueError, ZeroDivisionError):
+            return None
+    holds = _eval_goal(goal or {}, values)
+    return None if holds is None else not holds
 
 
 def witness_respects_assumptions(ex: dict, witness: dict | None) -> bool:
@@ -1061,10 +1134,20 @@ def witness_respects_assumptions(ex: dict, witness: dict | None) -> bool:
     return True
 
 
-def usable_witness(ex: dict, witness: dict | None, labels: list[str]) -> bool:
-    """The full witness gate: numerically reportable (D4) **and** admitted by the
-    exercise's assumptions. Never emit `proven_unequal` on anything else."""
-    return _usable_witness(witness, labels) and witness_respects_assumptions(ex, witness)
+def usable_witness(ex: dict, witness: dict | None, labels: list[str],
+                   goal: dict | None = None) -> bool:
+    """The full witness gate: numerically reportable (D4), admitted by the exercise's
+    assumptions, **and** not contradicted by an exact re-evaluation of the goal.
+    Never emit `proven_unequal` on anything else.
+
+    `goal` defaults to the induction goal; the equational oracle passes the synthesised
+    `source = target` it is actually refuting. A `None` verdict from
+    `witness_falsifies_goal` (outside the evaluable fragment) is permissive on purpose —
+    this filter may only ever *reject* a witness, never manufacture a requirement that
+    every goal be re-evaluable here."""
+    if not (_usable_witness(witness, labels) and witness_respects_assumptions(ex, witness)):
+        return False
+    return witness_falsifies_goal(goal if goal is not None else ex.get("goal"), witness) is not False
 
 
 # ---------------------------------------------------------------------------

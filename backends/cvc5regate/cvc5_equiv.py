@@ -140,7 +140,11 @@ def decide_equivalence(ex: dict, source: dict, target: dict) -> EquivResult:
     #    counterexample, and one we cannot re-check against the declared assumptions
     #    degrades to `unknown` below rather than becoming a `proven_unequal`.
     dis = cvc5_prover.disprove(dis_src, labels)
-    if dis.verdict == "sat" and ci.usable_witness(ex, dis.witness, labels):
+    # The relation this query refutes is `source = target`, NOT `ex["goal"]` (which in
+    # transformation mode is absent). Pass it explicitly so the re-evaluation checks the
+    # claim actually being made.
+    refuted = {"type": "eq", "slots": {"left": [source], "right": [target]}}
+    if dis.verdict == "sat" and ci.usable_witness(ex, dis.witness, labels, goal=refuted):
         return _store(key, EquivResult("proven_unequal", True, "fmf-fun",
                                        witness=dis.witness,
                                        detail="cvc5 found a counterexample"))
