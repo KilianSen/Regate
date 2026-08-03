@@ -4,6 +4,7 @@ import hashlib
 import os
 import re
 from dataclasses import dataclass
+from fractions import Fraction
 
 import cvc5_prover
 import step_check  # strict symbolic rule-instance checking of the student's steps
@@ -535,6 +536,93 @@ def _build_apply_defs(definitions: list[dict], ctx: _Ctx) -> str:
 
 
 # ---------------------------------------------------------------------------
+# `exercise.assumptions` — the declared facts that scope the exercise's domain.
+#
+# The protocol's `Assumption` is `{"kind": "nonzero"|"positive"|"integer"|
+# "constant", "value": <MathNode>}`. They are NOT decoration: SMT-LIB leaves
+# `(/ x 0)` underspecified, so a bare `x/x = 1` query is `sat` at `x = 0` and the
+# counterexample search happily returns the very point the exercise excluded — a
+# WRONG GRADE (`proven_unequal` on a correct answer). They are equally load-bearing
+# on the prove side: `x/x = 1` is only *valid* under the hypothesis `x ≠ 0`.
+#
+# So every SMT query built from an exercise carries them: as a hypothesis
+# (`(=> guard goal)`) in a prove query, and as an asserted constraint on the model
+# in a disprove query. A kind we cannot translate soundly makes the whole query
+# DECLINE (`InductionError` → `unknown`) — silently dropping an assumption is what
+# produced the wrong grade in the first place.
+#
+# `constant` is deliberately NOT translatable: it is a syntactic property of the
+# matched subterm ("is a numeral", cf. eggregate's `conditions.discharge`), not a
+# constraint on a numeric model, so there is no faithful SMT reading of it.
+# ---------------------------------------------------------------------------
+TRANSLATABLE_ASSUMPTIONS = ("nonzero", "positive", "integer")
+
+
+def parse_assumptions(ex: dict) -> list[dict]:
+    """`exercise.assumptions`, structurally validated. Raises `InductionError` for a
+    malformed entry or a kind with no sound SMT reading, so the caller declines."""
+    raw = ex.get("assumptions") or []
+    if not isinstance(raw, list):
+        raise InductionError("exercise.assumptions must be a list")
+    out = []
+    for a in raw:
+        if not isinstance(a, dict) or "kind" not in a or "value" not in a:
+            raise InductionError("each assumption needs a 'kind' and a 'value'")
+        kind = str(a["kind"])
+        if kind not in TRANSLATABLE_ASSUMPTIONS:
+            raise InductionError(
+                f"assumption kind {kind!r} has no sound SMT translation "
+                f"(supported: {', '.join(TRANSLATABLE_ASSUMPTIONS)})")
+        if not isinstance(a["value"], dict):
+            raise InductionError("assumption 'value' must be a MathNode")
+        out.append({"kind": kind, "value": a["value"]})
+    return out
+
+
+def _infer_assumptions(assumps: list[dict], env: dict[str, str], indvar: str,
+                       sigs: dict, dt: _Datatype) -> None:
+    """Type the assumption terms into the same environment as the goal, so a variable
+    mentioned only by an assumption still gets declared/bound in the emitted file."""
+    for a in assumps:
+        _infer(a["value"], "Q", env, indvar, sigs, dt)
+
+
+def _assumption_bools(assumps: list[dict], ctx: _Ctx) -> list[str]:
+    """The assumptions as SMT Bools over `ctx`."""
+    zero = _num_lit(0, ctx.sort)
+    out = []
+    for a in assumps:
+        term = _term(a["value"], ctx)
+        kind = a["kind"]
+        if kind == "nonzero":
+            out.append(f"(not (= {term} {zero}))")
+        elif kind == "positive":
+            out.append(f"(> {term} {zero})")
+        elif kind == "integer":
+            # Integral by construction in the ℤ domain; `is_int` is the Reals_Ints
+            # predicate for ℚ.
+            out.append("true" if ctx.sort == "Int" else f"(is_int {term})")
+        else:                                    # unreachable: parse_assumptions filters
+            raise InductionError(f"assumption kind {kind!r} has no sound SMT translation")
+    return out
+
+
+def _guard_of(assumps: list[dict], ctx: _Ctx) -> str:
+    """The conjunction of the assumptions, or "" when there are none."""
+    bools = _assumption_bools(assumps, ctx)
+    if not bools:
+        return ""
+    return bools[0] if len(bools) == 1 else f"(and {' '.join(bools)})"
+
+
+def _under_guard(guard: str, body: str) -> str:
+    """`body` under the declared assumptions. Negating this once yields BOTH queries:
+    `(not (forall … (=> guard body)))` proves, and `(not (=> guard body))` — i.e.
+    `guard ∧ ¬body` — searches for a counterexample *inside* the assumed domain."""
+    return f"(=> {guard} {body})" if guard else body
+
+
+# ---------------------------------------------------------------------------
 # The whole SMT-LIB file: preamble + recursive defs + (negated) goal.
 # ---------------------------------------------------------------------------
 def _numsort(ex: dict, goal: dict) -> str:
@@ -563,6 +651,12 @@ def _translate(ex: dict, force_val: bool = False) -> tuple[str, str, str, list[s
     ``force_val`` emits the ``val : Nat -> Int`` helper even when the goal never
     coerces a ℕ into a numeric position -- the disprove source needs it to read the
     induction variable back out via ``(get-value ((val n)))``.
+
+    The returned goal is already **under the exercise's declared assumptions**
+    (``(=> guard goal)``): negated it proves ``guard -> goal``, and as a free-constant
+    query it means ``guard AND NOT goal`` -- a counterexample the assumptions admit.
+    An assumption we cannot translate raises, so the query declines rather than
+    silently dropping it.
     """
     goal = ex.get("goal")
     if not goal or goal.get("type") not in (set(_REL) | {"divides"}):
@@ -577,10 +671,12 @@ def _translate(ex: dict, force_val: bool = False) -> tuple[str, str, str, list[s
     definitions = ex.get("definitions") or []
     sigs = _signatures(definitions, dt)
 
+    assumps = parse_assumptions(ex)
     env: dict[str, str] = {var: dt_tag}
     _infer(goal, "Q", env, var, sigs, dt)
     if env.get(var) != dt_tag:
         raise InductionError(f"induction variable {var!r} could not be typed as {dt.name}")
+    _infer_assumptions(assumps, env, var, sigs, dt)
 
     sort = _numsort(ex, goal)
     ctx = _Ctx(sort, env, dt, sigs)
@@ -591,7 +687,7 @@ def _translate(ex: dict, force_val: bool = False) -> tuple[str, str, str, list[s
     if any(d.get("lhs", {}).get("type") == "pow" for d in definitions):
         defs += _build_pow(definitions, ctx)
     defs += _build_apply_defs(definitions, ctx)
-    goal_bool = _goal_term(goal, ctx)
+    goal_bool = _under_guard(_guard_of(assumps, ctx), _goal_term(goal, ctx))
     preamble = _preamble(ctx, defs)
 
     num_vars = sorted(v for v, d in env.items() if d == "Q")
@@ -600,7 +696,8 @@ def _translate(ex: dict, force_val: bool = False) -> tuple[str, str, str, list[s
 
 def build_prove_source(ex: dict) -> str:
     """SMT for proving `∀n.P(n)`: assert the negated universally-quantified goal,
-    so `unsat` means the theorem holds."""
+    so `unsat` means the theorem holds. The goal already carries the exercise's
+    declared assumptions as a hypothesis (`_translate`)."""
     preamble, goal_bool, var, num_vars = _translate(ex)
     sort = _numsort(ex, ex["goal"])
     dtname = _parse_datatype(ex).name
@@ -618,7 +715,11 @@ def build_prove_source(ex: dict) -> str:
 def build_disprove_source(ex: dict) -> tuple[str, list[str]]:
     """SMT for refuting `∀n.P(n)`: the induction variable is a *free* constant and
     we ask cvc5 (with `--fmf-fun`) to find a numeric model — a counterexample. Also
-    returns the `get-value` labels naming the witness."""
+    returns the `get-value` labels naming the witness.
+
+    The asserted body is `(not (=> guard goal))` = `guard ∧ ¬goal`, so a model is a
+    counterexample the exercise's `assumptions` actually admit — never the excluded
+    point itself (`x = 0` is not a counterexample to `x/x = 1` under `x ≠ 0`)."""
     # `force_val`: the witness is read back as `(val n)`, so `val` must be defined
     # even when the goal itself never coerces `n` into a numeric position. Without
     # it cvc5 parse-errors on the `get-value` and the counterexample is lost.
@@ -687,12 +788,23 @@ def _mentions(node: dict, types: tuple[str, ...]) -> bool:
                for children in (node.get("slots") or {}).values() for ch in children)
 
 
-def build_rule_source(rule: dict, ex: dict) -> str:
+def build_rule_source(rule: dict, ex: dict, use_assumptions: bool = False) -> str:
     """SMT for proving one transmitted rule: assert the negated universally-
-    quantified equality, so `unsat` means the rule holds."""
+    quantified equality, so `unsat` means the rule holds.
+
+    `use_assumptions` puts the exercise's declared `assumptions` in front of the
+    equality as a hypothesis (`∀x⃗. guard → lhs = rhs`). It is OFF for *rule
+    verification* on purpose: `options.verify_rules` asks whether a rule is valid
+    **as transmitted**, and a rule's wildcards are not the exercise's variables, so
+    an exercise-level `x ≠ 0` must never be allowed to "prove" an unguarded rule that
+    happens to name a wildcard `x`. The equivalence oracle (`cvc5_equiv`) turns it ON:
+    there the lhs/rhs *are* the student's expressions, and `x/x = 1` is a theorem only
+    under the exercise's `x ≠ 0`.
+    """
     lhs_node, rhs_node = rule.get("lhs"), rule.get("rhs")
     if not lhs_node or not rhs_node:
         raise InductionError("rule needs lhs and rhs")
+    assumps = parse_assumptions(ex) if use_assumptions else []
 
     # The datatype + function signatures come from the exercise, exactly as in
     # `_translate`. Without them every `apply` fell back to the legacy ℕ heuristic
@@ -706,17 +818,20 @@ def build_rule_source(rule: dict, ex: dict) -> str:
     env: dict[str, str] = {}
     _infer(lhs_node, "Q", env, "", sigs, dt)
     _infer(rhs_node, "Q", env, "", sigs, dt)
+    _infer_assumptions(assumps, env, "", sigs, dt)
 
     sort = _numsort(ex, ex.get("goal") or {"type": "eq"})
     ctx = _Ctx(sort, env, dt, sigs)
 
+    nodes = [lhs_node, rhs_node] + [a["value"] for a in assumps]
     defs = ""
-    if _mentions(lhs_node, ("pow",)) or _mentions(rhs_node, ("pow",)):
+    if any(_mentions(n, ("pow",)) for n in nodes):
         defs += _build_pow(definitions, ctx)
-    if _mentions(lhs_node, ("apply",)) or _mentions(rhs_node, ("apply",)):
+    if any(_mentions(n, ("apply",)) for n in nodes):
         defs += _build_apply_defs(definitions, ctx)
 
-    body = f"(= {_term(lhs_node, ctx)} {_term(rhs_node, ctx)})"
+    body = _under_guard(_guard_of(assumps, ctx),
+                        f"(= {_term(lhs_node, ctx)} {_term(rhs_node, ctx)})")
     preamble = _preamble(ctx, defs)
 
     # Datatype binders first (see build_prove_source): a rule quantifying over a ℕ or
@@ -830,13 +945,16 @@ def certify(ex: dict) -> CertifyResult:
         # keyed by the real variables with numeric values is trustworthy — anything
         # else means "the goal is false but we have no reportable witness" → unknown,
         # never a `proven_unequal` carrying a misleading witness.
-        if _usable_witness(dis.witness, labels):
+        # The same gate covers `exercise.assumptions`: a point the exercise excluded
+        # is not a counterexample, so a witness we cannot show to satisfy the declared
+        # assumptions degrades to `unknown` too.
+        if usable_witness(ex, dis.witness, labels):
             return _store(key, CertifyResult("proven_unequal", False, "fmf-fun",
                                              witness=dis.witness,
                                              detail="cvc5 found a counterexample"))
         return _store(key, CertifyResult("unknown", False, "rejected",
-                                         detail="cvc5 refuted the goal but the counterexample is a "
-                                                "datatype term with no numeric witness"))
+                                         detail="cvc5 refuted the goal but produced no numeric "
+                                                "witness admitted by the declared assumptions"))
 
     # 2) Prove (structural induction), with an optional Alethe+Carcara re-check.
     res = cvc5_prover.prove(prove_src, want_certificate=True)
@@ -873,6 +991,80 @@ def _usable_witness(witness: dict | None, labels: list[str]) -> bool:
     if not witness:
         return False
     return all(k in labels and _NUM_WITNESS.match(str(v)) for k, v in witness.items())
+
+
+def _eval_witness(node: dict, values: dict[str, Fraction]) -> Fraction | None:
+    """Evaluate a MathNode at the witness point exactly, or `None` if it cannot be
+    (an unbound variable, a division by zero, a node outside the rational fragment).
+    Deliberately tiny: this is a *safety check*, so "cannot evaluate" must fail."""
+    t = node.get("type")
+    if t == "number":
+        try:
+            return Fraction(str(node.get("value")))
+        except (ValueError, ZeroDivisionError):
+            return None
+    if t in ("variable", "wild"):
+        return values.get(str(node.get("value")))
+    s = node.get("slots") or {}
+    try:
+        if t in ("add", "sub", "mul", "frac"):
+            key = ("numerator", "denominator") if t == "frac" else ("left", "right")
+            a, b = _eval_witness(s[key[0]][0], values), _eval_witness(s[key[1]][0], values)
+            if a is None or b is None:
+                return None
+            if t == "add":
+                return a + b
+            if t == "sub":
+                return a - b
+            if t == "mul":
+                return a * b
+            return None if b == 0 else a / b
+        if t == "neg":
+            v = _eval_witness(s["inner"][0], values)
+            return None if v is None else -v
+    except (KeyError, IndexError):
+        return None
+    return None
+
+
+def witness_respects_assumptions(ex: dict, witness: dict | None) -> bool:
+    """Fail-safe (D4 for assumptions): can this counterexample be *shown* to satisfy
+    the exercise's declared assumptions?
+
+    The queries already assert the assumptions, so a well-formed `sat` model satisfies
+    them by construction — this is the independent second opinion that keeps a
+    translation gap from ever surfacing as `proven_unequal`. Anything we cannot
+    re-evaluate here (an unbound variable, a term outside the rational fragment, an
+    untranslatable kind) answers **no**, and the caller degrades to `unknown`."""
+    try:
+        assumps = parse_assumptions(ex)
+    except InductionError:
+        return False
+    if not assumps:
+        return True
+    values: dict[str, Fraction] = {}
+    for k, v in (witness or {}).items():
+        try:
+            values[str(k)] = Fraction(str(v))
+        except (ValueError, ZeroDivisionError):
+            return False
+    for a in assumps:
+        v = _eval_witness(a["value"], values)
+        if v is None:
+            return False
+        if a["kind"] == "nonzero" and v == 0:
+            return False
+        if a["kind"] == "positive" and v <= 0:
+            return False
+        if a["kind"] == "integer" and v.denominator != 1:
+            return False
+    return True
+
+
+def usable_witness(ex: dict, witness: dict | None, labels: list[str]) -> bool:
+    """The full witness gate: numerically reportable (D4) **and** admitted by the
+    exercise's assumptions. Never emit `proven_unequal` on anything else."""
+    return _usable_witness(witness, labels) and witness_respects_assumptions(ex, witness)
 
 
 # ---------------------------------------------------------------------------

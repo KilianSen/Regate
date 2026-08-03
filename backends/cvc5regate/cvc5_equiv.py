@@ -41,35 +41,53 @@ class EquivResult:
 
 
 def build_prove_source(ex: dict, source: dict, target: dict) -> str:
-    """Validity query for `source = target`: reuse the rule prover's builder."""
-    return ci.build_rule_source({"id": "equiv", "lhs": source, "rhs": target}, ex)
+    """Validity query for `source = target`: reuse the rule prover's builder, with the
+    exercise's declared `assumptions` as hypotheses (`use_assumptions=True`).
+
+    They are not optional here: SMT-LIB division is underspecified at 0, so `x/x = 1`
+    is *not* valid unquantified — it is a theorem exactly under `x ≠ 0`. An assumption
+    kind with no sound translation raises `InductionError`, and the query declines to
+    `unknown` rather than proceeding without it."""
+    return ci.build_rule_source({"id": "equiv", "lhs": source, "rhs": target}, ex,
+                                use_assumptions=True)
 
 
 def build_disprove_source(ex: dict, source: dict, target: dict) -> tuple[str, list[str]]:
     """Counterexample search for `source = target`: the free variables are constants
     and cvc5 (with `--fmf-fun`) hunts a model where the two sides differ. Also
-    returns the `get-value` labels naming the witness."""
+    returns the `get-value` labels naming the witness.
+
+    The exercise's declared `assumptions` are asserted as constraints on that model,
+    so the search only ever ranges over points the exercise admits. Without them the
+    underspecified `(/ x 0)` made `x = 0` a "counterexample" to `x/x = 1` — a wrong
+    grade on a correct answer. An untranslatable kind raises, and the query declines."""
     # Datatype + signatures from the exercise, mirroring ci.build_rule_source: an
     # `apply` must be routed by its declared signature, not by the legacy ℕ guess.
     dt = ci._parse_datatype(ex)
     definitions = ex.get("definitions") or []
     sigs = ci._signatures(definitions, dt)
+    assumps = ci.parse_assumptions(ex)
 
     env: dict[str, str] = {}
     ci._infer(source, "Q", env, "", sigs, dt)
     ci._infer(target, "Q", env, "", sigs, dt)
+    # Assumption terms are typed into the same environment, so a variable mentioned
+    # only by an assumption is still declared in the emitted file.
+    ci._infer_assumptions(assumps, env, "", sigs, dt)
 
     sort = ci._numsort(ex, ex.get("goal") or {"type": "eq"})
     ctx = ci._Ctx(sort, env, dt, sigs)
 
+    nodes = [source, target] + [a["value"] for a in assumps]
     defs = ""
-    if ci._mentions(source, ("pow",)) or ci._mentions(target, ("pow",)):
+    if any(ci._mentions(n, ("pow",)) for n in nodes):
         defs += ci._build_pow(definitions, ctx)
-    if ci._mentions(source, ("apply",)) or ci._mentions(target, ("apply",)):
+    if any(ci._mentions(n, ("apply",)) for n in nodes):
         defs += ci._build_apply_defs(definitions, ctx)
 
     lhs = ci._term(source, ctx)
     rhs = ci._term(target, ctx)
+    guards = ci._assumption_bools(assumps, ctx)
 
     n_vars = sorted(v for v, d in env.items() if d == "N")
     q_vars = sorted(v for v, d in env.items() if d == "Q")
@@ -91,7 +109,8 @@ def build_disprove_source(ex: dict, source: dict, target: dict) -> tuple[str, li
     labels = q_vars + n_vars
     getvals = " ".join((f"(val {v})" if v in n_vars else v) for v in labels)
     body = (preamble + "\n".join(decls) + "\n"
-            f"(assert (not (= {lhs} {rhs})))\n"
+            + "".join(f"(assert {g})\n" for g in guards)
+            + f"(assert (not (= {lhs} {rhs})))\n"
             "(check-sat)\n")
     if labels:
         body += f"(get-value ({getvals}))\n"
@@ -116,9 +135,12 @@ def decide_equivalence(ex: dict, source: dict, target: dict) -> EquivResult:
     if not cvc5_prover.cvc5_available():
         return EquivResult("unknown", False, "unavailable", detail="cvc5 toolchain unavailable")
 
-    # 1) Disprove first — a numeric counterexample, when one exists.
+    # 1) Disprove first — a numeric counterexample, when one exists. The witness gate
+    #    is D4 *plus* the assumptions: a point the exercise excluded is not a
+    #    counterexample, and one we cannot re-check against the declared assumptions
+    #    degrades to `unknown` below rather than becoming a `proven_unequal`.
     dis = cvc5_prover.disprove(dis_src, labels)
-    if dis.verdict == "sat" and ci._usable_witness(dis.witness, labels):
+    if dis.verdict == "sat" and ci.usable_witness(ex, dis.witness, labels):
         return _store(key, EquivResult("proven_unequal", True, "fmf-fun",
                                        witness=dis.witness,
                                        detail="cvc5 found a counterexample"))
@@ -138,11 +160,13 @@ def decide_equivalence(ex: dict, source: dict, target: dict) -> EquivResult:
         return _store(key, EquivResult("proven_equal", True, "validity", smtlib=prove_src,
                                        detail="proved equivalent by cvc5"))
     if dis.verdict == "sat":
-        # Refuted, but the counterexample is unreportable (e.g. a datatype term) — honest
-        # "unequal but no numeric witness" degrades to unknown, never a witness-less
+        # Refuted, but the counterexample is unreportable (a datatype term, or a point
+        # we cannot show the declared assumptions admit) — honest "unequal but no usable
+        # witness" degrades to unknown, never a witness-less or assumption-violating
         # proven_unequal (protocol invariant).
         return _store(key, EquivResult("unknown", False, "rejected",
-                                       detail="cvc5 refuted equivalence but produced no numeric witness"))
+                                       detail="cvc5 refuted equivalence but produced no numeric "
+                                              "witness admitted by the declared assumptions"))
     return _store(key, EquivResult("unknown", False, "rejected", detail=res.detail[:600]))
 
 

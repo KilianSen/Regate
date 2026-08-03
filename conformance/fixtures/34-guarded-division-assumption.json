@@ -1,0 +1,46 @@
+{
+  "name": "34-guarded-division-assumption",
+  "description": "exercise.assumptions must reach EVERY grading path, not just `steps`. The student's answer x/x is correct under the declared x != 0, so the point x = 0 is outside the exercise's domain and is not a counterexample. eggregate excludes assumption-violating points from its counterexample search (semantics._env_satisfies); cvc5regate must too — it emits the assumption as an SMT assertion in the disprove query and as a hypothesis in the prove query, because SMT-LIB leaves (/ x 0) underspecified. It previously ignored the field entirely and answered proven_unequal with witness x=0: a WRONG GRADE on a correct answer, and two backends contradicting each other on the identical request. score 0 is not a failure here — the answer is equivalent but not yet in the target form, and `outcome` is authoritative.",
+  "request": {
+    "protocol": "1.1",
+    "exercise": {
+      "id": "guarded-division",
+      "mode": "transformation",
+      "source": {
+        "type": "frac",
+        "slots": {
+          "numerator": [ { "type": "variable", "value": "x" } ],
+          "denominator": [ { "type": "variable", "value": "x" } ]
+        }
+      },
+      "target": { "type": "number", "value": "1" },
+      "rules": [ "frac_self_one" ],
+      "assumptions": [
+        { "kind": "nonzero", "value": { "type": "variable", "value": "x" } }
+      ]
+    },
+    "submission": {
+      "final": {
+        "type": "frac",
+        "slots": {
+          "numerator": [ { "type": "variable", "value": "x" } ],
+          "denominator": [ { "type": "variable", "value": "x" } ]
+        }
+      }
+    }
+  },
+  "expect": {
+    "eggregate": {
+      "outcome": "proven_equal",
+      "score": 0,
+      "certified": true
+    },
+    "cvc5regate": {
+      "requires": "cvc5",
+      "outcome": "proven_equal",
+      "score": 0,
+      "certified": true,
+      "has_proof": true
+    }
+  }
+}

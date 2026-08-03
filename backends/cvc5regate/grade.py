@@ -50,6 +50,24 @@ def _validate_node(node, where: str, depth: int = 0) -> None:
             _validate_node(k, where, depth + 1)
 
 
+def _validate_assumptions(ex: dict) -> None:
+    """`exercise.assumptions` is grading input on every path (it scopes the domain the
+    counterexample search may range over), so a malformed one is a 400 — not a crash,
+    and certainly not a silently ignored field. The *kind* is not judged here: an
+    untranslatable kind is a well-formed request this backend declines (`unknown`)."""
+    raw = ex.get("assumptions")
+    if raw is None:
+        return
+    if not isinstance(raw, list):
+        raise RequestError("exercise.assumptions must be a list")
+    for i, a in enumerate(raw):
+        if not isinstance(a, dict) or not isinstance(a.get("kind"), str) or "value" not in a:
+            raise RequestError(
+                f"exercise.assumptions[{i}]: each assumption needs a string 'kind' "
+                f"and a MathNode 'value'")
+        _validate_node(a["value"], f"exercise.assumptions[{i}].value")
+
+
 def _envelope(outcome, score, certified, **extra):
     base = {"protocol": PROTOCOL, "backend": BACKEND, "backend_version": VERSION,
             "outcome": outcome, "score": score, "certified": certified,
@@ -63,6 +81,8 @@ def grade(request: dict) -> dict:
     if request.get("protocol", PROTOCOL).split(".")[0] != PROTOCOL.split(".")[0]:
         raise RequestError(f"unsupported protocol {request.get('protocol')!r}")
     ex = request.get("exercise") or {}
+
+    _validate_assumptions(ex)
 
     mode = ex.get("mode", "transformation")
     if mode == "induction":

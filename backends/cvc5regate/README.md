@@ -66,6 +66,36 @@ distributivity rule in the request (fixture `31`). Non-inductive equivalence
 queries *can* usually export an Alethe proof, so a `proven_equal` here may be
 Carcara-re-checked (`method = "alethe+carcara"`, `meta.equiv.rechecked: true`).
 
+### Declared assumptions scope every query
+
+`exercise.assumptions` reaches **every** SMT path, not just `steps` — the induction
+prove/disprove sources and the equivalence oracle's both. SMT-LIB leaves `(/ x 0)`
+underspecified, so without them the counterexample search returns `x = 0` as a
+"counterexample" to `x/x = 1` even when the exercise declared `x ≠ 0` — a wrong
+grade on a correct answer, and a contradiction of eggregate on the same request
+(fixture `34`). They are equally load-bearing on the prove side: `x/x = 1` is a
+theorem *exactly* under `x ≠ 0`.
+
+- **Disprove**: asserted as constraints on the model, so the search only ranges over
+  points the exercise admits.
+- **Prove**: an antecedent — `∀x. x ≠ 0 → x/x = 1`.
+- **Translated kinds**: `nonzero` (`(not (= t 0))`), `positive` (`(> t 0)`),
+  `integer` (`(is_int t)`; trivially true in the ℤ domain).
+- **`constant` and any unknown kind DECLINE**: `constant` is a syntactic property of
+  the matched subterm ("is a numeral", cf. eggregate's `conditions.discharge`), not a
+  constraint on a numeric model, so it has no faithful SMT reading. An assumption
+  this backend cannot translate makes the whole query `unknown` — never silently
+  dropped, which is exactly what produced the wrong grade.
+- **Fail-safe**: before any `proven_unequal`, the witness must be *shown* to satisfy
+  the declared assumptions (`witness_respects_assumptions`, re-evaluated over exact
+  rationals). Anything unverifiable degrades to `unknown`, mirroring the D4
+  `_usable_witness` gate. A malformed assumption is a 400, not a crash.
+- **Not** applied to *rule verification*: `options.verify_rules` asks whether a rule
+  is valid **as transmitted**, and a rule's wildcards are not the exercise's
+  variables, so `build_rule_source` takes assumptions only on explicit opt-in
+  (`use_assumptions=True`, used by the equivalence oracle). The trust boundary is
+  unchanged.
+
 ### The ruleset is trusted by default
 
 The transmitted `ruleset` is the caller's responsibility, validated upstream (see
@@ -188,6 +218,9 @@ other than `induction` / `transformation` / `equation`, which is a `400`.
 - `tests/test_cvc5_equiv.py` — non-induction grading tests (transformation +
   equation) against the stubbed solver seam: target-form, disproof witness,
   partial credit, derivation certification, and the oracle backstop.
+- `tests/test_cvc5_assumptions.py` — `exercise.assumptions` on both SMT paths:
+  the guarded-division wrong grade, the untranslatable-kind decline, and the
+  witness fail-safe.
 
 ## Run / deploy
 
