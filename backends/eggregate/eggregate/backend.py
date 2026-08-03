@@ -20,6 +20,13 @@ an ``i64`` literal guarded by ``ne(.., 0)``.
 """
 from __future__ import annotations
 
+import multiprocessing
+import os
+import threading
+from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import TimeoutError as FuturesTimeout
+from concurrent.futures.process import BrokenProcessPool
+
 from egglog import (
     EGraph,
     Expr,
@@ -205,6 +212,24 @@ THEORY = build_ruleset()
 # when an exercise genuinely needs deeper rewriting, and expect cost to climb.
 DEFAULT_BOUND = 5
 
+# A SIZE bound, not just an iteration bound. The iteration count above limits how many times
+# the ruleset is applied, but says nothing about how far the graph grows *within* one
+# application — and egglog offers no resource API of its own (no max-nodes, no fuel, no
+# timeout). When it runs out of memory the Rust allocator calls abort(): the whole process
+# dies with SIGABRT and an empty stdout, so no Python handler can turn it into an honest
+# `unknown`. Conformance fixture 31 ((x+1)(x-1) vs x·x-1) does exactly that at bound 12.
+#
+# egglog does expose observability (`all_function_sizes`), just not enforcement, so we drive
+# the schedule one iteration at a time and stop when the graph exceeds this budget. Stopping
+# early is sound: bounded saturation already means "not proven within the bound", never
+# "unequal" (see robust.decide_equivalence). Matches ProofEGraph's own max_nodes.
+MAX_ENODES = 60_000
+
+
+def _enode_count(egraph) -> int:
+    """Total e-nodes across every function table — egglog's only size signal."""
+    return sum(size for _, size in egraph.all_function_sizes())
+
 
 class EGraphView:
     """A saturated e-graph over one or more seed expressions."""
@@ -218,7 +243,17 @@ class EGraphView:
             t = to_math(s)
             self.egraph.let(f"seed{i}", t)
             self._terms[s] = t
-        self.egraph.run(rs * bound)
+        # One iteration at a time, so the size budget can be checked between them. `rs * bound`
+        # in a single call never returns control to Python, which is why this blew past every
+        # bound before: there was no point at which anything could look.
+        self.stopped_early = False
+        self.iterations = 0
+        for _ in range(bound):
+            self.egraph.run(rs)
+            self.iterations += 1
+            if _enode_count(self.egraph) > MAX_ENODES:
+                self.stopped_early = True
+                break
 
     def _term(self, node: MathNode):
         t = self._terms.get(node)
@@ -236,6 +271,67 @@ class EGraphView:
             return False
 
 
+# ---------------------------------------------------------------------------
+# Process isolation for the oracle.
+#
+# The size budget above stops egglog growing once we NOTICE it, but the check can only run
+# between iterations, so a single iteration can still overshoot. And egglog's failure mode is
+# abort(): the Rust allocator kills the process, no Python handler runs, stdout is empty. In a
+# long-lived server that takes the request handler with it.
+#
+# So the oracle also runs in a worker process. If the worker dies — abort, OOM kill, RLIMIT_AS —
+# the parent observes a BrokenProcessPool instead of dying, and answers "no evidence". That is
+# the sound direction and exactly what this oracle already promises: a False here means "not
+# proven within the bound", never "unequal" (robust.decide_equivalence reads it that way).
+#
+# Cost is negligible: ~0.07 s once to spawn, ~0.3 ms per call thereafter, against grading work
+# measured in tens to hundreds of ms. Set EGGREGATE_ISOLATE=0 to run in-process (tests, tracing).
+_ISOLATE = os.environ.get("EGGREGATE_ISOLATE", "1") not in ("0", "false", "no")
+_ORACLE_TIMEOUT = float(os.environ.get("EGGREGATE_ORACLE_TIMEOUT", "120"))
+_ORACLE_MEM_GB = float(os.environ.get("EGGREGATE_ORACLE_MEM_GB", "4"))
+_POOL = None
+_POOL_LOCK = threading.Lock()
+
+
+def _worker_init(mem_gb: float) -> None:
+    """Cap the worker's address space so a runaway dies as a contained worker, not as the host."""
+    try:
+        import resource
+        limit = int(mem_gb * 1024 ** 3)
+        resource.setrlimit(resource.RLIMIT_AS, (limit, limit))
+    except Exception:                       # noqa: BLE001 - a missing rlimit must not break grading
+        pass
+
+
+def _pool():
+    global _POOL
+    if _POOL is None:
+        ctx = multiprocessing.get_context("spawn")   # never fork: the server is threaded
+        _POOL = ProcessPoolExecutor(max_workers=1, mp_context=ctx,
+                                    initializer=_worker_init, initargs=(_ORACLE_MEM_GB,))
+    return _POOL
+
+
+def _reset_pool() -> None:
+    global _POOL
+    dead, _POOL = _POOL, None
+    if dead is not None:
+        try:
+            dead.shutdown(wait=False)
+        except Exception:                   # noqa: BLE001
+            pass
+
+
+def _equivalent_inproc(x: MathNode, y: MathNode, rules: list[Rule] | None,
+                       bound: int) -> bool:
+    """The oracle itself, no isolation. Module-level so the worker can unpickle it."""
+    try:
+        view = EGraphView(x, y, rules=rules, bound=bound)
+        return view.same_class(x, y)
+    except ValueError:                      # cannot translate an op into the theory
+        return False
+
+
 def equivalent(x: MathNode, y: MathNode, rules: list[Rule] | None = None,
                bound: int = DEFAULT_BOUND) -> bool:
     """Are ``x`` and ``y`` provably equal under the (bounded) rule theory?
@@ -244,12 +340,26 @@ def equivalent(x: MathNode, y: MathNode, rules: list[Rule] | None = None,
     theory does not model) simply yields no oracle evidence. Returning ``False``
     is the sound direction: the oracle can only ever *fail* to see an equality,
     and ``decide_equivalence`` reads that as UNKNOWN, never as "unequal".
+
+    Runs in an isolated worker by default, so an egglog abort/OOM degrades to "no
+    evidence" instead of taking the process down (see the isolation notes above).
     """
-    try:
-        view = EGraphView(x, y, rules=rules, bound=bound)
-        return view.same_class(x, y)
-    except ValueError:                  # cannot translate an op into the theory
-        return False
+    if not _ISOLATE:
+        return _equivalent_inproc(x, y, rules, bound)
+    with _POOL_LOCK:
+        try:
+            return _pool().submit(_equivalent_inproc, x, y, rules, bound).result(
+                timeout=_ORACLE_TIMEOUT)
+        except BrokenProcessPool:
+            # The worker died — egglog abort(), the OOM killer, or our own RLIMIT_AS.
+            # No evidence, which is the sound direction. Rebuild for the next request.
+            _reset_pool()
+            return False
+        except FuturesTimeout:
+            _reset_pool()
+            return False
+        except ValueError:              # cannot translate an op into the theory
+            return False
 
 
 def grade(student_final: MathNode, target: MathNode,
