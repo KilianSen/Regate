@@ -8,14 +8,42 @@
         "type": "mul",
         "slots": {
           "left": [
-            { "type": "add", "slots": {
-              "left": [ { "type": "variable", "value": "x" } ],
-              "right": [ { "type": "number", "value": "1" } ] } }
+            {
+              "type": "add",
+              "slots": {
+                "left": [
+                  {
+                    "type": "variable",
+                    "value": "x"
+                  }
+                ],
+                "right": [
+                  {
+                    "type": "number",
+                    "value": "1"
+                  }
+                ]
+              }
+            }
           ],
           "right": [
-            { "type": "sub", "slots": {
-              "left": [ { "type": "variable", "value": "x" } ],
-              "right": [ { "type": "number", "value": "1" } ] } }
+            {
+              "type": "sub",
+              "slots": {
+                "left": [
+                  {
+                    "type": "variable",
+                    "value": "x"
+                  }
+                ],
+                "right": [
+                  {
+                    "type": "number",
+                    "value": "1"
+                  }
+                ]
+              }
+            }
           ]
         }
       },
@@ -23,11 +51,30 @@
         "type": "sub",
         "slots": {
           "left": [
-            { "type": "mul", "slots": {
-              "left": [ { "type": "variable", "value": "x" } ],
-              "right": [ { "type": "variable", "value": "x" } ] } }
+            {
+              "type": "mul",
+              "slots": {
+                "left": [
+                  {
+                    "type": "variable",
+                    "value": "x"
+                  }
+                ],
+                "right": [
+                  {
+                    "type": "variable",
+                    "value": "x"
+                  }
+                ]
+              }
+            }
           ],
-          "right": [ { "type": "number", "value": "1" } ]
+          "right": [
+            {
+              "type": "number",
+              "value": "1"
+            }
+          ]
         }
       }
     },
@@ -36,14 +83,42 @@
         "type": "mul",
         "slots": {
           "left": [
-            { "type": "add", "slots": {
-              "left": [ { "type": "variable", "value": "x" } ],
-              "right": [ { "type": "number", "value": "1" } ] } }
+            {
+              "type": "add",
+              "slots": {
+                "left": [
+                  {
+                    "type": "variable",
+                    "value": "x"
+                  }
+                ],
+                "right": [
+                  {
+                    "type": "number",
+                    "value": "1"
+                  }
+                ]
+              }
+            }
           ],
           "right": [
-            { "type": "sub", "slots": {
-              "left": [ { "type": "variable", "value": "x" } ],
-              "right": [ { "type": "number", "value": "1" } ] } }
+            {
+              "type": "sub",
+              "slots": {
+                "left": [
+                  {
+                    "type": "variable",
+                    "value": "x"
+                  }
+                ],
+                "right": [
+                  {
+                    "type": "number",
+                    "value": "1"
+                  }
+                ]
+              }
+            }
           ]
         }
       }
@@ -54,7 +129,13 @@
       "requires": "cvc5",
       "outcome": "proven_equal",
       "certified": true
+    },
+    "eggregate": {
+      "outcome": "equal_no_certificate",
+      "score": null,
+      "certified": false
     }
   },
-  "note": "cvc5regate's headline non-induction capability: the SMT oracle proves (x+1)(x-1) ≡ x·x-1 with NO transmitted ruleset at all — something the symbolic backends (eggregate/leanregate) cannot do without a distributivity rule in the request. The student's final is still the unfactored source, so it is `proven_equal` (equivalent) but earns no partial credit toward the target form; `outcome` is authoritative, not `score`."
+  "note": "cvc5regate's headline non-induction capability: the SMT oracle proves (x+1)(x-1) \u2261 x\u00b7x-1 with NO transmitted ruleset at all \u2014 something the symbolic backends (eggregate/leanregate) cannot do without a distributivity rule in the request. The student's final is still the unfactored source, so it is `proven_equal` (equivalent) but earns no partial credit toward the target form; `outcome` is authoritative, not `score`.",
+  "description": " eggregate is a declared target here specifically as a CRASH GUARD. This fixture used to kill the eggregate process outright: egglog's Rust allocator called abort() during bounded saturation at bound 12, so the backend exited 134 with empty stdout \u2014 no envelope at all, which is the one result the five-outcome protocol has no home for. Because the fixture previously had no `expect.eggregate`, conformance never sent it there and the defect shipped unobserved. The expectation is deliberately the honest-inconclusive verdict rather than a grade: what is being guarded is that a well-formed GradeResponse comes back at all. NOTE: this row is slow (~75 s) \u2014 the escalating-bound search over a product of sums is genuinely expensive, which is the same property that made it explode."
 }
