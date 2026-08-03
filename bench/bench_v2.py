@@ -404,7 +404,10 @@ def m5_egglog_sweep():
         print(f"{R:>7}{s['median']*1000:>14.1f}"
               f"{f'{s["min"]*1000:.1f} – {s["max"]*1000:.1f}':>26}{s['n']:>5}"
               f"{s['median']/R*1e6:>11.1f}  {seen.get('v')}")
-    RESULTS["m5_egglog_sweep"] = rows
+    from eggregate.backend import _ISOLATE
+    RESULTS["m5_egglog_sweep"] = {"isolated": _ISOLATE, "rows": rows}
+    print(f"\n  process isolation during this sweep: {'ON' if _ISOLATE else 'OFF'}"
+          + ("" if _ISOLATE else "  (algorithmic cost — comparable with measurement 1)"))
 
 
 if __name__ == "__main__":

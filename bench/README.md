@@ -28,8 +28,25 @@ python3 bench_v2.py 5                # just one; results MERGE into the json
 | 3 | saturation grid, m ∈ {1..4} × bound ∈ {2,4,6,8} | every cell, incl. those hitting a limit |
 | 4 | abstention matrix | every fixture × every backend |
 | 5 | the measurement-1 workload through the egglog oracle | identifies which engine a number came from |
+| 6 | derivation length k (`bench_v3.py`) | replay is Θ(k) — the old Θ(k²) was pre-bugfix |
+| 7 | ruleset size, CARRYING | rules parsed but never matched — ~30 µs/rule |
+| 8 | induction by backend | n ≥ 5; two cvc5 rows, default vs 1 s budget |
+| 9 | transport baseline | one fixed delta instead of a per-row overhead column |
 
-## Two things to know before quoting a number
+`bench_v2.py` holds 1–5, `bench_v3.py` holds 6–9; both merge into the same results file.
+
+## Three things to know before quoting a number
+
+**Carrying vs saturating.** The per-rule cost differs by ~90x depending on regime: ~30 µs to CARRY a
+rule that is parsed and never matched (measurement 7 — the number behind "an instructor can grow the
+palette freely"), against ~1.1 ms (egglog) or ~2.7 ms (ProofEGraph) to SATURATE with it
+(measurements 5 and 1). A figure quoted without naming its regime is off by up to two orders of
+magnitude; this is what made the old 37 µs and 2.7 ms figures look irreconcilable.
+
+**Measurement 1 bends past R ≈ 1000.** Beyond roughly a thousand rules the match-collection budget
+in `proof_egraph.saturate` truncates the work, so t/R falls (590 µs at R = 10 005). That is the
+resource bound biting, NOT better scaling. Quote the linear regime, or mark those rows.
+
 
 **Which engine.** eggregate has two: the hand-written `ProofEGraph` (~2.7 ms/rule) and the
 egglog-compiled oracle behind `backend.equivalent` (~1.1 ms/rule). They differ by 2.5×, so any
