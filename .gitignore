@@ -12,7 +12,15 @@ backends/leanregate/build/
 # configure without it ("No lake-manifest.json found"), which failed the leanregate
 # job on every run. It also pins the exact Mathlib revision, so CI resolves the same
 # dependencies the emitter was verified against instead of whatever is newest.
-backends/leanregate/Regate/        # runtime scratch: lean_prover/check_induction write proofs here
+# runtime scratch: lean_prover/check_induction write proofs here. NOTE: the comment must be on
+# its own line — .gitignore has no inline comments, so `Regate/  # ...` was one literal pattern
+# and matched nothing, which is how these scratch files kept surfacing as untracked.
+backends/leanregate/Regate/
+# Build artifacts the Dockerfile generates (see leanregate/Dockerfile:37,47). `.lean_env` bakes
+# ABSOLUTE LEAN_PATH/LD_LIBRARY_PATH for the machine that built it — committing it makes
+# lean_prover take its direct-`lean` fast path with paths that do not exist anywhere else,
+# which is exactly how CI ended up reporting `unknown module prefix 'Mathlib'`.
+backends/leanregate/.lean_env
 
 # IDE / OS
 .idea/
