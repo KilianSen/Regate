@@ -227,16 +227,38 @@ class ProofEGraph:
             return
         for _ in range(bound):
             members = self.members()
+            # The match list is bounded too. Collecting every match before applying any of them
+            # is its own memory sink, independent of graph growth: matches scale as
+            # nodes x rules x substitutions, so at 60k nodes this list alone reached multiple GB
+            # (capping only `add_term` below cut fixture 31 from ~20 GB to ~5 GB and still climbing).
+            # `max_nodes` rewrites per iteration is already far more than a bounded run can use.
+            app_budget = max_nodes
             applications = []
             for dr in drules:
+                if len(applications) >= app_budget:
+                    break
                 for i in range(len(self.nodes)):
+                    if len(applications) >= app_budget:
+                        break
                     for subst in self._match_node(dr.pattern, i, {}, members):
                         if dr.conditions and not _guards_ok(dr, subst, self.term_of,
                                                             assumptions):
                             continue
                         applications.append((dr, i, subst))
+                        if len(applications) >= app_budget:
+                            break
             did = False
             for dr, i, subst in applications:
+                # Enforce the cap HERE, not only after the iteration. Every `add_term` below
+                # grows the graph, and one iteration can apply tens of thousands of rewrites, so
+                # checking only between iterations lets a single pass blow straight past the
+                # bound: measured 23_604 -> 305_180 e-nodes in one step (5x over the cap), and
+                # ~20 GB resident on conformance fixture 31 before the OS intervened. Since
+                # AC/distributivity have no finite fixpoint, this cap is the ONLY thing bounding
+                # memory, so it has to hold inside the loop. Stopping early is sound: bounded
+                # saturation already means "not proven within the bound", never "unequal".
+                if len(self.nodes) > max_nodes:
+                    break
                 term_subst = {k: self.term_of[v] for k, v in subst.items()}
                 rhs_term = instantiate(dr.template, term_subst)
                 rhs = self.add_term(rhs_term)

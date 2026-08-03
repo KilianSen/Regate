@@ -1,0 +1,941 @@
+{
+  "cutoff_s": 60.0,
+  "m1_rule_sweep": [
+    {
+      "R": 29,
+      "directed": 42,
+      "n": 10,
+      "median": 0.05461276799996995,
+      "min": 0.05452258799999754,
+      "max": 0.05790539299999864,
+      "samples": [
+        0.055285,
+        0.054554,
+        0.057905,
+        0.054665,
+        0.054834,
+        0.054537,
+        0.054528,
+        0.05456,
+        0.055917,
+        0.054523
+      ],
+      "per_rule_us": 1883.1988965506878
+    },
+    {
+      "R": 58,
+      "directed": 84,
+      "n": 10,
+      "median": 0.15877228549999245,
+      "min": 0.1576132309999707,
+      "max": 0.16004855299996734,
+      "samples": [
+        0.158093,
+        0.159874,
+        0.159541,
+        0.157691,
+        0.157613,
+        0.159599,
+        0.160049,
+        0.15902,
+        0.158525,
+        0.158512
+      ],
+      "per_rule_us": 2737.4531982757317
+    },
+    {
+      "R": 116,
+      "directed": 168,
+      "n": 10,
+      "median": 0.3133033650000243,
+      "min": 0.3127920050000057,
+      "max": 0.3160883980000335,
+      "samples": [
+        0.314852,
+        0.316088,
+        0.312792,
+        0.313088,
+        0.31318,
+        0.314025,
+        0.313036,
+        0.313427,
+        0.313686,
+        0.312842
+      ],
+      "per_rule_us": 2700.8910775864165
+    },
+    {
+      "R": 232,
+      "directed": 336,
+      "n": 10,
+      "median": 0.625389068000004,
+      "min": 0.6225848539999674,
+      "max": 0.651699629999996,
+      "samples": [
+        0.626535,
+        0.623186,
+        0.622585,
+        0.6517,
+        0.626551,
+        0.625048,
+        0.625965,
+        0.623754,
+        0.624477,
+        0.62573
+      ],
+      "per_rule_us": 2695.6425344827762
+    },
+    {
+      "R": 464,
+      "directed": 672,
+      "n": 5,
+      "median": 1.2527272329999732,
+      "min": 1.2494375800000057,
+      "max": 1.2694955479999521,
+      "samples": [
+        1.252727,
+        1.253729,
+        1.251607,
+        1.249438,
+        1.269496
+      ],
+      "per_rule_us": 2699.8431745689077
+    },
+    {
+      "R": 986,
+      "directed": 1428,
+      "n": 5,
+      "median": 2.680343124999979,
+      "min": 2.6612827740000284,
+      "max": 2.710785661999978,
+      "samples": [
+        2.670551,
+        2.661283,
+        2.685315,
+        2.710786,
+        2.680343
+      ],
+      "per_rule_us": 2718.400735294096
+    },
+    {
+      "R": 2987,
+      "directed": 4326,
+      "n": 5,
+      "median": 8.143108997000013,
+      "min": 8.075302582000006,
+      "max": 8.24701847099999,
+      "samples": [
+        8.162779,
+        8.143109,
+        8.138246,
+        8.247018,
+        8.075303
+      ],
+      "per_rule_us": 2726.1831258788125
+    },
+    {
+      "R": 10005,
+      "directed": 14490,
+      "n": 5,
+      "median": 27.328095126999983,
+      "min": 27.202964809000036,
+      "max": 27.386467629000038,
+      "samples": [
+        27.328095,
+        27.30768,
+        27.202965,
+        27.386468,
+        27.359063
+      ],
+      "per_rule_us": 2731.443790804596
+    }
+  ],
+  "m2_lean": [
+    {
+      "R": 1,
+      "n": 5,
+      "median": 3.2921030249999603,
+      "min": 3.2246006080000598,
+      "max": 15.862804874999995,
+      "samples": [
+        15.862805,
+        3.277446,
+        3.292103,
+        3.224601,
+        3.308118
+      ],
+      "outcome": "proven_equal"
+    },
+    {
+      "R": 8,
+      "n": 5,
+      "median": 25.836392079000007,
+      "min": 25.386237385000072,
+      "max": 26.68722362999995,
+      "samples": [
+        26.285472,
+        25.63535,
+        25.386237,
+        26.687224,
+        25.836392
+      ],
+      "outcome": "proven_equal"
+    },
+    {
+      "R": 10,
+      "n": 5,
+      "median": 32.601660320000065,
+      "min": 32.39619764200006,
+      "max": 32.767816198000105,
+      "samples": [
+        32.570462,
+        32.60166,
+        32.396198,
+        32.767816,
+        32.637575
+      ],
+      "outcome": "proven_equal"
+    }
+  ],
+  "m3_saturation_grid": [
+    {
+      "m": 1,
+      "bound": 2,
+      "nodes": 4,
+      "fixpoint": 1,
+      "node_capped": false,
+      "n": 10,
+      "median": 0.0005265099999292033,
+      "min": 0.0005174039999928937,
+      "max": 0.0005454800000279647,
+      "samples": [
+        0.000525,
+        0.00054,
+        0.00052,
+        0.000525,
+        0.000517,
+        0.000545,
+        0.000543,
+        0.000528,
+        0.000517,
+        0.00054
+      ]
+    },
+    {
+      "m": 1,
+      "bound": 4,
+      "nodes": 4,
+      "fixpoint": 1,
+      "node_capped": false,
+      "n": 10,
+      "median": 0.000522112500050298,
+      "min": 0.0005173040000272522,
+      "max": 0.0005515230000128213,
+      "samples": [
+        0.000536,
+        0.000523,
+        0.000522,
+        0.000519,
+        0.000522,
+        0.000518,
+        0.000552,
+        0.000518,
+        0.000525,
+        0.000517
+      ]
+    },
+    {
+      "m": 1,
+      "bound": 6,
+      "nodes": 4,
+      "fixpoint": 1,
+      "node_capped": false,
+      "n": 10,
+      "median": 0.0005244884999910937,
+      "min": 0.0005170440000483723,
+      "max": 0.0006053930000007313,
+      "samples": [
+        0.000527,
+        0.000518,
+        0.000526,
+        0.000517,
+        0.000544,
+        0.000518,
+        0.000605,
+        0.000528,
+        0.000518,
+        0.000523
+      ]
+    },
+    {
+      "m": 1,
+      "bound": 8,
+      "nodes": 4,
+      "fixpoint": 1,
+      "node_capped": false,
+      "n": 10,
+      "median": 0.0005227449999551936,
+      "min": 0.0005171970000219517,
+      "max": 0.0005414139999402323,
+      "samples": [
+        0.000522,
+        0.000541,
+        0.000519,
+        0.000524,
+        0.000518,
+        0.000524,
+        0.000518,
+        0.000523,
+        0.000517,
+        0.000538
+      ]
+    },
+    {
+      "m": 2,
+      "bound": 2,
+      "nodes": 34,
+      "fixpoint": 5,
+      "node_capped": false,
+      "n": 10,
+      "median": 0.0034979865000650534,
+      "min": 0.003475137000009454,
+      "max": 0.0035502769999311568,
+      "samples": [
+        0.00352,
+        0.003493,
+        0.00351,
+        0.003508,
+        0.003482,
+        0.003475,
+        0.003478,
+        0.00355,
+        0.003503,
+        0.003492
+      ]
+    },
+    {
+      "m": 2,
+      "bound": 4,
+      "nodes": 98,
+      "fixpoint": 5,
+      "node_capped": false,
+      "n": 10,
+      "median": 0.02826598600000807,
+      "min": 0.028145479999921008,
+      "max": 0.028663801999982752,
+      "samples": [
+        0.028664,
+        0.028293,
+        0.028433,
+        0.028237,
+        0.028145,
+        0.028288,
+        0.028279,
+        0.028244,
+        0.028253,
+        0.028227
+      ]
+    },
+    {
+      "m": 2,
+      "bound": 6,
+      "nodes": 100,
+      "fixpoint": 5,
+      "node_capped": false,
+      "n": 10,
+      "median": 0.09959672150000642,
+      "min": 0.09939785300002768,
+      "max": 0.10033141299993531,
+      "samples": [
+        0.099806,
+        0.099468,
+        0.099398,
+        0.100331,
+        0.09966,
+        0.099593,
+        0.099491,
+        0.09954,
+        0.099601,
+        0.099966
+      ]
+    },
+    {
+      "m": 2,
+      "bound": 8,
+      "nodes": 100,
+      "fixpoint": 5,
+      "node_capped": false,
+      "n": 10,
+      "median": 0.09948970649998046,
+      "min": 0.09806940099997519,
+      "max": 0.09987165699999423,
+      "samples": [
+        0.099872,
+        0.099384,
+        0.099478,
+        0.0994,
+        0.099609,
+        0.098069,
+        0.099727,
+        0.099451,
+        0.099502,
+        0.09969
+      ]
+    },
+    {
+      "m": 3,
+      "bound": 2,
+      "nodes": 96,
+      "fixpoint": null,
+      "node_capped": false,
+      "n": 10,
+      "median": 0.0077563294999549726,
+      "min": 0.007726883000032103,
+      "max": 0.007908283999995547,
+      "samples": [
+        0.007908,
+        0.007756,
+        0.007756,
+        0.007775,
+        0.007727,
+        0.007807,
+        0.007735,
+        0.007732,
+        0.007768,
+        0.00774
+      ]
+    },
+    {
+      "m": 3,
+      "bound": 4,
+      "nodes": 885,
+      "fixpoint": null,
+      "node_capped": false,
+      "n": 10,
+      "median": 0.19605170249997173,
+      "min": 0.19507972299993526,
+      "max": 0.19820885000001454,
+      "samples": [
+        0.195618,
+        0.196586,
+        0.195563,
+        0.196486,
+        0.19508,
+        0.197174,
+        0.195373,
+        0.198209,
+        0.195447,
+        0.196739
+      ]
+    },
+    {
+      "m": 3,
+      "bound": 6,
+      "nodes": 13091,
+      "fixpoint": null,
+      "node_capped": false,
+      "n": 5,
+      "median": 9.53693237999994,
+      "min": 9.505872911999973,
+      "max": 9.614329107000003,
+      "samples": [
+        9.605332,
+        9.505873,
+        9.529176,
+        9.614329,
+        9.536932
+      ]
+    },
+    {
+      "m": 3,
+      "bound": 8,
+      "unmeasured": "cutoff >60s at bound 7"
+    },
+    {
+      "m": 4,
+      "bound": 2,
+      "nodes": 160,
+      "fixpoint": null,
+      "node_capped": false,
+      "n": 10,
+      "median": 0.012737796000010349,
+      "min": 0.012662873999943258,
+      "max": 0.012903736999987814,
+      "samples": [
+        0.012904,
+        0.012789,
+        0.012739,
+        0.012736,
+        0.012744,
+        0.012714,
+        0.012709,
+        0.012745,
+        0.012686,
+        0.012663
+      ]
+    },
+    {
+      "m": 4,
+      "bound": 4,
+      "nodes": 3332,
+      "fixpoint": null,
+      "node_capped": false,
+      "n": 10,
+      "median": 0.6687581589999354,
+      "min": 0.6664944169999671,
+      "max": 0.6744481340001585,
+      "samples": [
+        0.668434,
+        0.666494,
+        0.66863,
+        0.668887,
+        0.674448,
+        0.668887,
+        0.668583,
+        0.669967,
+        0.669418,
+        0.668004
+      ]
+    },
+    {
+      "m": 4,
+      "bound": 6,
+      "nodes": 305180,
+      "fixpoint": null,
+      "node_capped": true,
+      "n": 1,
+      "median": 160.05053757500013,
+      "min": 160.05053757500013,
+      "max": 160.05053757500013,
+      "samples": [
+        160.050538
+      ],
+      "capped": true
+    },
+    {
+      "m": 4,
+      "bound": 8,
+      "unmeasured": "cutoff >60s at bound 6"
+    }
+  ],
+  "m4_prover_availability": {
+    "cvc5": true,
+    "coqc": true,
+    "lean": true,
+    "egglog": true
+  },
+  "m4_abstention": {
+    "tally": {
+      "eggregate": {
+        "proven_equal": 15,
+        "proven_unequal": 1,
+        "invalid_derivation": 5,
+        "equal_no_certificate": 4,
+        "unknown": 5,
+        "error": 4,
+        "timeout": 0,
+        "crash": 1
+      },
+      "leanregate": {
+        "proven_equal": 5,
+        "proven_unequal": 0,
+        "invalid_derivation": 1,
+        "equal_no_certificate": 0,
+        "unknown": 27,
+        "error": 2,
+        "timeout": 0,
+        "crash": 0
+      },
+      "coqregate": {
+        "proven_equal": 3,
+        "proven_unequal": 0,
+        "invalid_derivation": 1,
+        "equal_no_certificate": 0,
+        "unknown": 30,
+        "error": 1,
+        "timeout": 0,
+        "crash": 0
+      },
+      "cvc5regate": {
+        "proven_equal": 26,
+        "proven_unequal": 3,
+        "invalid_derivation": 1,
+        "equal_no_certificate": 0,
+        "unknown": 3,
+        "error": 2,
+        "timeout": 0,
+        "crash": 0
+      }
+    },
+    "detail": [
+      {
+        "fixture": "01-target-form.json",
+        "eggregate": "proven_equal",
+        "leanregate": "proven_equal",
+        "coqregate": "unknown",
+        "cvc5regate": "proven_equal"
+      },
+      {
+        "fixture": "02-partial-unsimplified.json",
+        "eggregate": "proven_equal",
+        "leanregate": "unknown",
+        "coqregate": "unknown",
+        "cvc5regate": "proven_equal"
+      },
+      {
+        "fixture": "03-wrong-answer.json",
+        "eggregate": "proven_unequal",
+        "leanregate": "unknown",
+        "coqregate": "unknown",
+        "cvc5regate": "proven_unequal"
+      },
+      {
+        "fixture": "04-valid-derivation.json",
+        "eggregate": "proven_equal",
+        "leanregate": "unknown",
+        "coqregate": "unknown",
+        "cvc5regate": "proven_equal"
+      },
+      {
+        "fixture": "05-fabricated-step.json",
+        "eggregate": "invalid_derivation",
+        "leanregate": "unknown",
+        "coqregate": "unknown",
+        "cvc5regate": "proven_unequal"
+      },
+      {
+        "fixture": "06-inline-ruleset.json",
+        "eggregate": "proven_equal",
+        "leanregate": "unknown",
+        "coqregate": "unknown",
+        "cvc5regate": "proven_equal"
+      },
+      {
+        "fixture": "07-malformed-no-target.json",
+        "eggregate": "error",
+        "leanregate": "error",
+        "coqregate": "unknown",
+        "cvc5regate": "error"
+      },
+      {
+        "fixture": "08-equation-mode.json",
+        "eggregate": "proven_equal",
+        "leanregate": "unknown",
+        "coqregate": "unknown",
+        "cvc5regate": "proven_equal"
+      },
+      {
+        "fixture": "09-hint-without-reference.json",
+        "eggregate": "proven_equal",
+        "leanregate": "unknown",
+        "coqregate": "unknown",
+        "cvc5regate": "proven_equal"
+      },
+      {
+        "fixture": "10-unsound-ruleset-rejected.json",
+        "eggregate": "error",
+        "leanregate": "proven_equal",
+        "coqregate": "unknown",
+        "cvc5regate": "proven_equal"
+      },
+      {
+        "fixture": "11-equation-derivation.json",
+        "eggregate": "proven_equal",
+        "leanregate": "unknown",
+        "coqregate": "unknown",
+        "cvc5regate": "proven_equal"
+      },
+      {
+        "fixture": "12-lean-certified-derivation.json",
+        "eggregate": "proven_equal",
+        "leanregate": "unknown",
+        "coqregate": "unknown",
+        "cvc5regate": "proven_equal"
+      },
+      {
+        "fixture": "13-assumption-discharged.json",
+        "eggregate": "proven_equal",
+        "leanregate": "unknown",
+        "coqregate": "unknown",
+        "cvc5regate": "proven_equal"
+      },
+      {
+        "fixture": "13-leanregate-runtime-ruleset.json",
+        "eggregate": "proven_equal",
+        "leanregate": "proven_equal",
+        "coqregate": "unknown",
+        "cvc5regate": "proven_equal"
+      },
+      {
+        "fixture": "14-assumption-missing.json",
+        "eggregate": "invalid_derivation",
+        "leanregate": "unknown",
+        "coqregate": "unknown",
+        "cvc5regate": "proven_equal"
+      },
+      {
+        "fixture": "15-leibniz-substitution.json",
+        "eggregate": "proven_equal",
+        "leanregate": "unknown",
+        "coqregate": "unknown",
+        "cvc5regate": "proven_equal"
+      },
+      {
+        "fixture": "16-leibniz-no-hypothesis.json",
+        "eggregate": "invalid_derivation",
+        "leanregate": "unknown",
+        "coqregate": "unknown",
+        "cvc5regate": "proven_equal"
+      },
+      {
+        "fixture": "17-derived-lemma-reuse.json",
+        "eggregate": "proven_equal",
+        "leanregate": "unknown",
+        "coqregate": "unknown",
+        "cvc5regate": "proven_equal"
+      },
+      {
+        "fixture": "18-broken-lemma.json",
+        "eggregate": "invalid_derivation",
+        "leanregate": "unknown",
+        "coqregate": "unknown",
+        "cvc5regate": "proven_equal"
+      },
+      {
+        "fixture": "19-induction-valid.json",
+        "eggregate": "equal_no_certificate",
+        "leanregate": "unknown",
+        "coqregate": "unknown",
+        "cvc5regate": "unknown"
+      },
+      {
+        "fixture": "20-induction-circular-ih.json",
+        "eggregate": "invalid_derivation",
+        "leanregate": "invalid_derivation",
+        "coqregate": "invalid_derivation",
+        "cvc5regate": "invalid_derivation"
+      },
+      {
+        "fixture": "21-ac-normalization.json",
+        "eggregate": "proven_equal",
+        "leanregate": "unknown",
+        "coqregate": "unknown",
+        "cvc5regate": "proven_equal"
+      },
+      {
+        "fixture": "22-induction-empty-submission.json",
+        "eggregate": "unknown",
+        "leanregate": "unknown",
+        "coqregate": "unknown",
+        "cvc5regate": "unknown"
+      },
+      {
+        "fixture": "23-induction-certified-inline-ruleset.json",
+        "eggregate": "equal_no_certificate",
+        "leanregate": "proven_equal",
+        "coqregate": "proven_equal",
+        "cvc5regate": "proven_equal"
+      },
+      {
+        "fixture": "24-unverified-ruleset-is-trusted.json",
+        "eggregate": "equal_no_certificate",
+        "leanregate": "unknown",
+        "coqregate": "proven_equal",
+        "cvc5regate": "proven_equal"
+      },
+      {
+        "fixture": "25-verify-rules-rejects-unsound-rule.json",
+        "eggregate": "error",
+        "leanregate": "unknown",
+        "coqregate": "unknown",
+        "cvc5regate": "unknown"
+      },
+      {
+        "fixture": "26-malformed-goal-is-rejected.json",
+        "eggregate": "error",
+        "leanregate": "error",
+        "coqregate": "error",
+        "cvc5regate": "error"
+      },
+      {
+        "fixture": "27-apply-recursive-sum-disproof.json",
+        "eggregate": "unknown",
+        "leanregate": "unknown",
+        "coqregate": "unknown",
+        "cvc5regate": "proven_unequal"
+      },
+      {
+        "fixture": "28-apply-generalized-ih-fact.json",
+        "eggregate": "unknown",
+        "leanregate": "unknown",
+        "coqregate": "unknown",
+        "cvc5regate": "proven_equal"
+      },
+      {
+        "fixture": "29-datatype-list-induction.json",
+        "eggregate": "unknown",
+        "leanregate": "unknown",
+        "coqregate": "unknown",
+        "cvc5regate": "proven_equal"
+      },
+      {
+        "fixture": "30-datatype-tree-induction.json",
+        "eggregate": "unknown",
+        "leanregate": "unknown",
+        "coqregate": "unknown",
+        "cvc5regate": "proven_equal"
+      },
+      {
+        "fixture": "31-cvc5-algebraic-equivalence.json",
+        "eggregate": "crash",
+        "leanregate": "unknown",
+        "coqregate": "unknown",
+        "cvc5regate": "proven_equal"
+      },
+      {
+        "fixture": "32-reverse-ih-substitution.json",
+        "eggregate": "equal_no_certificate",
+        "leanregate": "proven_equal",
+        "coqregate": "proven_equal",
+        "cvc5regate": "proven_equal"
+      },
+      {
+        "fixture": "33-apply-plain-binary-operator.json",
+        "eggregate": "proven_equal",
+        "leanregate": "unknown",
+        "coqregate": "unknown",
+        "cvc5regate": "proven_equal"
+      },
+      {
+        "fixture": "34-guarded-division-assumption.json",
+        "eggregate": "proven_equal",
+        "leanregate": "unknown",
+        "coqregate": "unknown",
+        "cvc5regate": "proven_equal"
+      }
+    ]
+  },
+  "m5_egglog_sweep": [
+    {
+      "R": 29,
+      "n": 10,
+      "median": 0.03794692650012621,
+      "min": 0.0368078209999112,
+      "max": 0.042335115000241785,
+      "samples": [
+        0.042335,
+        0.037984,
+        0.038065,
+        0.037872,
+        0.042323,
+        0.03706,
+        0.036808,
+        0.037135,
+        0.037909,
+        0.042199
+      ],
+      "per_rule_us": 1308.514706900904,
+      "result": true
+    },
+    {
+      "R": 58,
+      "n": 10,
+      "median": 0.06847208249996584,
+      "min": 0.06679973800009975,
+      "max": 0.07741514100007407,
+      "samples": [
+        0.06944,
+        0.066977,
+        0.067133,
+        0.077415,
+        0.067504,
+        0.072101,
+        0.0668,
+        0.072214,
+        0.067096,
+        0.071538
+      ],
+      "per_rule_us": 1180.5531465511351,
+      "result": true
+    },
+    {
+      "R": 116,
+      "n": 10,
+      "median": 0.1328893350000726,
+      "min": 0.12884745000019393,
+      "max": 0.13692743799992968,
+      "samples": [
+        0.13293,
+        0.132225,
+        0.132192,
+        0.133066,
+        0.128847,
+        0.13583,
+        0.133013,
+        0.132849,
+        0.129439,
+        0.136927
+      ],
+      "per_rule_us": 1145.5977155178673,
+      "result": true
+    },
+    {
+      "R": 232,
+      "n": 10,
+      "median": 0.26091165799994087,
+      "min": 0.2580427900002178,
+      "max": 0.2635080060003929,
+      "samples": [
+        0.258418,
+        0.263508,
+        0.261848,
+        0.260633,
+        0.260699,
+        0.261612,
+        0.261158,
+        0.261124,
+        0.258043,
+        0.25811
+      ],
+      "per_rule_us": 1124.6192155169865,
+      "result": true
+    },
+    {
+      "R": 464,
+      "n": 10,
+      "median": 0.5053503814999658,
+      "min": 0.501126966999891,
+      "max": 0.5267628920000789,
+      "samples": [
+        0.526763,
+        0.501803,
+        0.510296,
+        0.502985,
+        0.506154,
+        0.517805,
+        0.501127,
+        0.502657,
+        0.512294,
+        0.504547
+      ],
+      "per_rule_us": 1089.117201508547,
+      "result": true
+    },
+    {
+      "R": 986,
+      "n": 5,
+      "median": 1.0765078989998074,
+      "min": 1.0728066410001702,
+      "max": 1.1225255069998639,
+      "samples": [
+        1.106203,
+        1.122526,
+        1.072807,
+        1.076508,
+        1.073959
+      ],
+      "per_rule_us": 1091.7930010140033,
+      "result": true
+    }
+  ]
+}
