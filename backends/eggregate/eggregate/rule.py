@@ -16,20 +16,20 @@ def nonzero(var: str) -> SideCondition:
 
 @dataclass(frozen=True)
 class Rule:
-    """One rewrite rule from a BlockDefinition bean (thesis ``RewriteRule``)."""
+    """One rewrite rule from a BlockDefinition bean."""
 
     id: str
     owner: str            # the block that owns the rule
     lhs: MathNode         # pattern
     rhs: MathNode         # template
     bidir: bool = False   # B = bidirectional, F = forward-only
-    # Guards that must be discharged before the rule may fire (Section 5).
+    # Guards that must be discharged before the rule may fire.
     conditions: tuple[SideCondition, ...] = ()
 
 
 # ---------------------------------------------------------------------------
 # JSON (de)serialization — so a ruleset can travel in a grading request rather
-# than being hardcoded (thesis §6.3, instructor-authored rules).
+# than being hardcoded (instructor-authored rules).
 # ---------------------------------------------------------------------------
 _COND_KINDS = {"nonzero", "positive", "integer", "constant", "notequal"}
 

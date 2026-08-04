@@ -1,13 +1,13 @@
-"""The directed step engine and hint generation (thesis Section 5.6 / B.4).
+"""The directed step engine and hint generation.
 
 This interprets the *same* catalogue (``catalogue.py``) as directed tree
 rewrites -- the step-by-step engine that mirrors the MS1 kernel.  On top of it:
 
   * ``greedy_hints`` reproduces ``suggestHints``: enumerate every (path, rule)
     rewrite that changes the tree, dedup, rank by one-ply distance to the goal,
-    return the best three (Table 8).  This is the heuristic the thesis critiques.
+    return the best three.  This is the heuristic MS3 improves on.
 
-  * ``shortest_path`` is the MS3 improvement (Section B.4): a breadth-first
+  * ``shortest_path`` is the MS3 improvement: a breadth-first
     search over directed applications that returns a *whole* path to the goal,
     so guidance can be ranked by progress-to-goal rather than a single greedy
     next move -- and can surface a pedagogically natural ordering.
@@ -109,7 +109,7 @@ def applications(node: MathNode, rules: list[Rule], *, bidirectional: bool = Fal
 
 
 # ---------------------------------------------------------------------------
-# Greedy one-ply hints (reproduces Table 8 -- the heuristic MS3 improves on).
+# Greedy one-ply hints (the heuristic MS3 improves on).
 # ---------------------------------------------------------------------------
 def greedy_hints(state: MathNode, target: MathNode, rules: list[Rule], k: int = 3,
                  assumptions: frozenset[Assumption] = frozenset()):
@@ -119,7 +119,7 @@ def greedy_hints(state: MathNode, target: MathNode, rules: list[Rule], k: int = 
 
 
 # ---------------------------------------------------------------------------
-# Multi-step hint: a whole path to the goal (the MS3 improvement, Section B.4).
+# Multi-step hint: a whole path to the goal (the MS3 improvement).
 # ---------------------------------------------------------------------------
 @dataclass(frozen=True)
 class Step:
@@ -167,7 +167,7 @@ def all_shortest_paths(source: MathNode, target: MathNode, rules: list[Rule],
 
     Because the e-graph view knows the goal class, the hinter can enumerate all
     minimal plans and choose a pedagogically natural ordering -- e.g. one that
-    clears the ``+0`` before cancelling (Section B.4) -- rather than being forced
+    clears the ``+0`` before cancelling -- rather than being forced
     into the single greedy next move.
     """
     first = shortest_path(source, target, rules, max_depth)

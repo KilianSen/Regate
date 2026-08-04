@@ -507,7 +507,7 @@ def _grade_core(source, target, rules, by_id, sub, opts, ref, assumptions=frozen
 
     # 1) a submitted derivation: each step must be a valid rule application AND
     #    its claimed result must match what the rule actually produces (the
-    #    thesis's RewriteChainGrader check (iii)). Guarded steps are discharged
+    #    RewriteChainGrader check (iii)). Guarded steps are discharged
     #    against the declared `assumptions`; Type-B steps must use a hypothesis.
     if sub.get("steps"):
         steps_in = sub["steps"]
@@ -542,7 +542,7 @@ def _grade_core(source, target, rules, by_id, sub, opts, ref, assumptions=frozen
     resp = _grade_final(source, final, target, oracle, ac, assumptions, bounds, partial)
     resp["steps"] = steps_out
     # Hint toward the goal when the answer is not yet full marks. A reference
-    # derivation steers the hint onto the intended route (§B.4); without one we
+    # derivation steers the hint onto the intended route; without one we
     # still offer the shortest directed next move.
     if opts.get("want_hint") and resp["score"] != 100:
         if ref is not None:
@@ -623,7 +623,7 @@ def _grade_final(source, final, target, rules, ac=False, assumptions=frozenset()
     """Transformation grade for a final expression.
 
     Reaching the target *form* is full marks; a value-equivalent but unsimplified
-    answer earns partial credit (the thesis's distance formula) -- the e-graph
+    answer earns partial credit (the distance formula) -- the e-graph
     distinguishes "wrong" from "right value, keep going"; not equivalent is zero
     with a numeric witness.
     """

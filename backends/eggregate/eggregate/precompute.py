@@ -1,4 +1,4 @@
-"""Per-exercise e-graph precomputation (thesis MS3, Section 6.1).
+"""Per-exercise e-graph precomputation (MS3).
 
 An exercise is authored once but graded for many students.  Equality saturation
 -- the expensive part -- depends only on the exercise (target + rule set), not on
@@ -15,8 +15,8 @@ saturation seeded from it (with early-stop on the target) -- never the full base
 again.  Each submission runs on a ``clone()`` so they can't contaminate one
 another.
 
-This is the thesis's "up-front asynchronous saturation cost and storage for fast,
-path-independent checks at grading time" made concrete.
+This trades up-front asynchronous saturation cost and storage for fast,
+path-independent checks at grading time.
 """
 from __future__ import annotations
 

@@ -2,9 +2,7 @@
 reasoning in learning platforms, built on egglog equality saturation.
 
 It speaks the language-agnostic grading contract (GRADING_PROTOCOL.md), so any
-host platform integrates against the contract, not this package. Originated as a
-bachelor's thesis extending Artemis ("Extending Artemis with proof based
-mathematical exercises", Section 4.5 / 5.7 and Appendix B); Artemis is the
+host platform integrates against the contract, not this package. Artemis is the
 reference adopter, not a dependency.
 """
 from .model import (

@@ -1,12 +1,12 @@
-"""The expression model (thesis Section 4.1 / 5.2).
+"""The expression model.
 
 A ``MathNode`` is a typed tree built from a small set of blocks.  Children are
-stored in *alphabetical slot order*, which is exactly the path encoding the
-thesis uses (Section 5.6): "each integer indexes the flat child list obtained by
+stored in *alphabetical slot order*, which is exactly the path encoding used:
+"each integer indexes the flat child list obtained by
 visiting slots in alphabetical order".  A fraction therefore exposes
 ``[denominator, numerator]`` -- index 0 is the denominator, index 1 the
 numerator -- so the inner sum ``x + 0`` of ``3*(x+0) / (3*1)`` lives at path
-``[1, 1]`` (numerator, then the mul's right child), matching Appendix B.
+``[1, 1]`` (numerator, then the mul's right child).
 
 The JSON shape (``{"type", "value"?, "slots"?}``) is a plain typed-tree any host
 can produce; it is deliberately compatible with the format the reference adopter
@@ -19,7 +19,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from typing import Iterator
 
-# Block -> its slot names in ALPHABETICAL order (= the thesis path encoding).
+# Block -> its slot names in ALPHABETICAL order (= the path encoding).
 SLOTS: dict[str, tuple[str, ...]] = {
     "number": (),
     "variable": (),
@@ -272,7 +272,7 @@ def ac_normalize(node: "MathNode") -> "MathNode":
 
 
 # ---------------------------------------------------------------------------
-# The distance metric (service/MathNodeDistance, Appendix B):
+# The distance metric (service/MathNodeDistance):
 # multiset symmetric difference of all subtrees.
 # ---------------------------------------------------------------------------
 def distance(a: MathNode, b: MathNode) -> int:

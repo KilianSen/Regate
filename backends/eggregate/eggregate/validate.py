@@ -1,13 +1,13 @@
-"""Step-local verification (thesis Section 5, corrected per the design doc).
+"""Step-local verification.
 
-The design doc's key correction: a step produced by *matching a rule's LHS and
+The key point: a step produced by *matching a rule's LHS and
 emitting its RHS* is valid **by construction** -- you do not need an e-graph to
 re-confirm an equality you just generated.  Soundness therefore lives in this
 validator plus the guarded rule library, not in per-step saturation.  The
 e-graph is reserved for what this layer cannot certify cheaply: manual edits and
 macro-steps (see ``backend.equivalent`` / the macro-step checker).
 
-Two interactions, kept strictly separate (doc Section 3):
+Two interactions, kept strictly separate:
 
   * Type A -- structural rewrite: apply a catalogue rule at a path.
   * Type B -- contextual (Leibniz/congruence) substitution: replace an
@@ -120,7 +120,7 @@ def apply_equation(state: MathNode, equation: Equation, path: Path, *,
                    in_scope: bool = True) -> StepResult:
     """Replace the occurrence at ``path`` of ``equation.lhs`` with ``equation.rhs``.
 
-    Validity (doc Section 3, Type B): the equation is in scope AND the targeted
+    Validity (Type B): the equation is in scope AND the targeted
     subtree equals the equation's LHS exactly (structural equality; the model has
     no binders, so no alpha-equivalence is needed).
     """
@@ -167,7 +167,7 @@ class ChainReport:
 
 def verify_chain(source: MathNode, moves: list[Move], goal: MathNode, *,
                  assumptions: frozenset[Assumption] = frozenset()) -> ChainReport:
-    """Replay a derivation, checking every step is locally valid (doc Section 5).
+    """Replay a derivation, checking every step is locally valid.
 
     With a sound step chain, endpoint equivalence follows by transitivity, so the
     real work is the per-step invariant -- this never invokes the e-graph.  OPEN

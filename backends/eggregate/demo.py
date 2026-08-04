@@ -15,7 +15,7 @@ def rule(line=""):
     print(line)
 
 
-# -- the exercise (Table 5) -------------------------------------------------
+# -- the exercise -----------------------------------------------------------
 x = var("x")
 source = frac(mul(num(3), add(var("x"), num(0))), mul(num(3), num(1)))
 target = x
@@ -24,7 +24,7 @@ AVAILABLE = rules(
 )
 
 rule("=" * 70)
-rule("  Eggregate -- MS3 e-graph backend, Appendix B worked example")
+rule("  Eggregate -- MS3 e-graph backend, worked example")
 rule("=" * 70)
 rule(f"  source : {pretty(source)}")
 rule(f"  target : {pretty(target)}")
@@ -32,11 +32,11 @@ rule(f"  rules  : {', '.join(r.id for r in AVAILABLE)}")
 
 # -- 1. Equivalence grading is path-independent -----------------------------
 rule()
-rule("1) EQUIVALENCE GRADING (path-independent, Section 4.4)")
+rule("1) EQUIVALENCE GRADING (path-independent)")
 rule("-" * 70)
 
-# The thesis's three-step derivation (Table 6).
-thesis_chain = [
+# The reference three-step derivation.
+reference_chain = [
     ("add_zero_right",       [1, 1], frac(mul(num(3), var("x")), mul(num(3), num(1)))),
     ("frac_mul_cancel_left", [],     frac(var("x"), num(1))),
     ("frac_one_denom",       [],     var("x")),
@@ -48,7 +48,7 @@ alt_chain = [
     ("frac_one_denom",       [],     var("x")),
 ]
 
-for label, chain in [("thesis derivation", thesis_chain), ("alternative derivation", alt_chain)]:
+for label, chain in [("reference derivation", reference_chain), ("alternative derivation", alt_chain)]:
     final = chain[-1][2]
     g = grade(final, target, rules=AVAILABLE)
     rule(f"  {label:<22} ends at {pretty(final):<6} -> grade {g}")
@@ -63,13 +63,13 @@ rule(f"  wrong final     {pretty(wrong):<6} -> grade {grade(wrong, target, rules
 rule(f"  unfinished      {pretty(partial):<6} -> grade {grade(partial, target, rules=AVAILABLE)}"
      f"   (equivalent to x/1, not yet x)")
 
-# -- 2. The replay trace with the real distance metric (Table 7) ------------
+# -- 2. The replay trace with the real distance metric ----------------------
 rule()
-rule("2) REPLAY TRACE with MathNodeDistance to x (reproduces Table 7)")
+rule("2) REPLAY TRACE with MathNodeDistance to x")
 rule("-" * 70)
 rule(f"  {'after step':<12}{'state':<20}{'distance':<10}{'partial credit'}")
 d0 = distance(source, target)
-states = [("—", source)] + [(rid, st) for rid, _, st in thesis_chain]
+states = [("—", source)] + [(rid, st) for rid, _, st in reference_chain]
 for i, (rid, st) in enumerate(states):
     d = distance(st, target)
     pc = 100 if d == 0 else max(0, min(99, int((1 - d / d0) * 100)))
@@ -78,7 +78,7 @@ for i, (rid, st) in enumerate(states):
 
 # -- 3. Greedy one-ply hints vs. the MS3 whole-path hint --------------------
 rule()
-rule("3) HINTS: greedy one-ply (Table 8) vs. MS3 whole-path (Section B.4)")
+rule("3) HINTS: greedy one-ply vs. MS3 whole-path")
 rule("-" * 70)
 rule("  Greedy one-ply ranking at the source (what suggestHints returns today):")
 for i, app in enumerate(greedy_hints(source, target, AVAILABLE, k=3), 1):

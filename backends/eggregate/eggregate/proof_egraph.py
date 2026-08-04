@@ -218,7 +218,7 @@ class ProofEGraph:
         If ``connect=(a, b)`` is given, stop as soon as the two are in the same
         class -- proving needs only enough saturation to *link* the endpoints,
         not a full fixpoint, which keeps the AC/distributivity blow-up at bay.
-        ``max_nodes`` is a hard resource bound (the thesis's Section 6.3 concern).
+        ``max_nodes`` is a hard resource bound.
         ``assumptions`` are the exercise's declared facts, which is what lets a
         guarded rule fire on a symbolic binding (``x/x -> 1`` under ``x != 0``).
 

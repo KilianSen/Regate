@@ -14,18 +14,20 @@ hints, and partial credit) fast, with per-step soundness by construction. It run
 on a hand-written proof-producing e-graph plus
 [egglog](https://github.com/egraphs-good/egglog) equality saturation.
 
-It originated as the **MS3 e-graph reasoning backend** of the bachelor's thesis
-*Extending Artemis with proof-based mathematical exercises* (`main.pdf`,
-Sections 4.5 / 5.7 and Appendix B), where MS3 is designed but not yet implemented.
-This package implements it end to end and grew into a self-contained toolkit for
-equational-reasoning exercises: grading, proving, hinting, and soundness checking
-over a shared rule catalogue. The two core MS3 capabilities:
+It originated as the **MS3 e-graph reasoning backend** for proof-based
+mathematical exercises in Artemis, where MS3 was designed but not yet
+implemented. This package implements it end to end and grew into a self-contained
+toolkit for equational-reasoning exercises: grading, proving, hinting, and
+soundness checking over a shared rule catalogue. For how the originating thesis
+maps onto this source tree, see
+**[`THESIS_CODE_MAP.md`](https://github.com/KilianSen/Artemis/blob/Abgabe/THESIS_CODE_MAP.md)**.
+The two core MS3 capabilities:
 
-1. **Equivalence-based grading** (§4.4) — saturate, then check whether the
+1. **Equivalence-based grading** — saturate, then check whether the
    student's final expression lands in the *same e-class* as the target. This is
    **path-independent**: it accepts *any* valid derivation, not just a replay of
    one stored chain.
-2. **Multi-step hints** (§B.4) — extract a *whole path* to the goal instead of
+2. **Multi-step hints** — extract a *whole path* to the goal instead of
    the single greedy next move, so guidance can be ordered pedagogically (e.g.
    "clear the +0 first") and ranked by progress-to-goal.
 
@@ -46,9 +48,9 @@ doesn't.
 ## Run it
 
 ```sh
-.venv/bin/python demo.py            # reproduces Appendix B (Tables 6/7/8)
+.venv/bin/python demo.py            # the worked example end to end
 .venv/bin/python demo_backends.py   # bfs vs egg provers, side by side
-.venv/bin/python test_eggregate.py  # tests pinning the thesis numbers + soundness
+.venv/bin/python test_eggregate.py  # tests pinning the reference numbers + soundness
 .venv/bin/python check_rules.py     # CI gate: fails if any rewrite rule is unsound
 ```
 
@@ -76,7 +78,7 @@ docker run -i eggregate --cli < request.json      # batch: stdin -> stdout (OCI 
 
 The same handler (`service.grade`) sits behind both transports. Grading is
 mode-aware: reaching the **target form** is full marks; a value-equivalent but
-unsimplified answer earns **partial credit** (the thesis distance formula); a
+unsimplified answer earns **partial credit** (the distance formula); a
 fabricated step result or a non-equivalent answer is rejected (0, with a numeric
 witness); and an inconclusive result returns `score: null` for review — never a
 false grade.
@@ -84,7 +86,7 @@ false grade.
 **The ruleset travels in the request, not the binary.** An exercise supplies its
 own rules inline (`exercise.ruleset`: full pattern/template/guard definitions
 with wildcards) or references the built-in catalogue by id (`exercise.rules`).
-This realises the thesis's instructor-authored rules (§6.3). The ruleset is
+This realises instructor-authored rules. The ruleset is
 authored and validated **upstream** (a code contribution, reviewed + CI-checked),
 so eggregate **trusts it by default** and grades the derivation against it. To
 re-check anyway — a not-yet-trusted source, or CI — set `options.verify_rules`
@@ -93,32 +95,36 @@ re-check anyway — a not-yet-trusted source, or CI — set `options.verify_rule
 before it can grade anything. The built-in catalogue is only eggregate's own
 test/demo/gate fixture, not the production rule source.
 
-## Layout — and how it maps to the thesis
+## Layout
 
-| File | Role | Thesis |
-|---|---|---|
-| `eggregate/model.py` | `MathNode` typed tree (the persisted JSON shape), alphabetical-slot path encoding, pretty-printer, `MathNodeDistance` metric | §4.1, §5.2, §5.6 |
-| `eggregate/matching.py` | the single shared matcher/instantiator (client + server can't diverge) | §4.3, §9 |
-| `eggregate/conditions.py` | three-valued side conditions for **guarded rules** (nonzero/positive/integer/…) | §5, §6.3 |
-| `eggregate/catalogue.py` | the rewrite-rule catalogue as **one shared data source** | Table 4, §4.3 |
-| `eggregate/validate.py` | **step-local validator**: Type-A rule application, Type-B Leibniz substitution, whole-proof replay | §5, doc §3/§5 |
-| `eggregate/backend.py` | egglog `Math` datatype, catalogue→ruleset compiler, **bounded** equality saturation, `equivalent` / `grade` (pass-sound oracle) | §4.5, §5.7, §6.3 |
-| `eggregate/hints.py` | directed step engine, greedy one-ply `greedy_hints`, and `shortest_path` / `all_shortest_paths` (paths + `N_min`) — **prover #1 (bfs)** | §5.6, §B.4 |
-| `eggregate/proof_egraph.py` | a **proof-producing e-graph** (congruence closure + provenance + `explain`) — **prover #2 (egg)** | §4.5; FMCAD 2022 |
-| `eggregate/compare.py` | run both provers on one goal and contrast (existence, length, time) | — |
-| `eggregate/semantics.py` | exact rational evaluation + **counterexample search** (sound disproof) | §5 soundness |
-| `eggregate/audit.py` | **rule-library soundness fuzzer** (catches unsound rules / missing guards) | §5, doc "verify the rules" |
-| `eggregate/robust.py` | three-valued `decide_equivalence`, `grade_robust`, and `recheck_proof` (trusted kernel) | §4.4 |
-| `eggregate/reference.py` | **sample-solution-guided** proving / hints / progress (landmark search) | §B.4 |
-| `eggregate/precompute.py` | **per-exercise e-graph precomputation** — saturate once, grade many | §6.1 |
-| `eggregate/service.py` | grading-protocol handler (maps the contract onto the internals) | §5.5 |
-| `eggregate/server.py` | CLI + HTTP transports for the protocol | §5.5 |
-| `demo.py` / `demo_backends.py` | Appendix B; and the two provers side by side | Appendix B |
+> The file-by-file mapping onto the originating thesis sections is maintained
+> separately, in
+> **[`THESIS_CODE_MAP.md`](https://github.com/KilianSen/Artemis/blob/Abgabe/THESIS_CODE_MAP.md)**.
+
+| File | Role |
+|---|---|
+| `eggregate/model.py` | `MathNode` typed tree (the persisted JSON shape), alphabetical-slot path encoding, pretty-printer, `MathNodeDistance` metric |
+| `eggregate/matching.py` | the single shared matcher/instantiator (client + server can't diverge) |
+| `eggregate/conditions.py` | three-valued side conditions for **guarded rules** (nonzero/positive/integer/…) |
+| `eggregate/catalogue.py` | the rewrite-rule catalogue as **one shared data source** |
+| `eggregate/validate.py` | **step-local validator**: Type-A rule application, Type-B Leibniz substitution, whole-proof replay |
+| `eggregate/backend.py` | egglog `Math` datatype, catalogue→ruleset compiler, **bounded** equality saturation, `equivalent` / `grade` (pass-sound oracle) |
+| `eggregate/hints.py` | directed step engine, greedy one-ply `greedy_hints`, and `shortest_path` / `all_shortest_paths` (paths + `N_min`) — **prover #1 (bfs)** |
+| `eggregate/proof_egraph.py` | a **proof-producing e-graph** (congruence closure + provenance + `explain`, cf. FMCAD 2022) — **prover #2 (egg)** |
+| `eggregate/compare.py` | run both provers on one goal and contrast (existence, length, time) |
+| `eggregate/semantics.py` | exact rational evaluation + **counterexample search** (sound disproof) |
+| `eggregate/audit.py` | **rule-library soundness fuzzer** (catches unsound rules / missing guards) |
+| `eggregate/robust.py` | three-valued `decide_equivalence`, `grade_robust`, and `recheck_proof` (trusted kernel) |
+| `eggregate/reference.py` | **sample-solution-guided** proving / hints / progress (landmark search) |
+| `eggregate/precompute.py` | **per-exercise e-graph precomputation** — saturate once, grade many |
+| `eggregate/service.py` | grading-protocol handler (maps the contract onto the internals) |
+| `eggregate/server.py` | CLI + HTTP transports for the protocol |
+| `demo.py` / `demo_backends.py` | the worked example; and the two provers side by side |
 
 The catalogue is consumed by **two engines without duplication** — the egglog
 ruleset is *compiled* from it, and the directed stepper/validator *interpret* it
-directly through the one shared matcher. This is the thesis's "single shared rule
-source, two engines" principle (§4.3), here made literal.
+directly through the one shared matcher. This is the "single shared rule
+source, two engines" principle, here made literal.
 
 ## Division of labour
 
@@ -188,7 +194,7 @@ as landmarks:
 - **Proving** decomposes into `k` trivial one-hop searches instead of one global
   search — `guided_prove` returns a stable, reference-aligned proof. `check_reference`
   validates the instructor's own solution and recovers its fine-grained steps.
-- **Hints** follow the *intended route*, fixing the §B.4 complaint: at the source,
+- **Hints** follow the *intended route*, fixing the greedy-hint complaint: at the source,
   greedy picks `frac_mul_cancel_left` ("removes the most structure"), but
   `guided_hint` returns `add_zero_right` — "clear the +0 first". A student who
   **diverges** is re-anchored to the nearest waypoint and steered back onto the
@@ -216,8 +222,8 @@ on the target), never the full base again. Each submission runs on a `clone()`
 so they can't contaminate one another. The *score* comes from this fast path;
 the *proof* (only when asked) is a fresh early-stopping `egg_prove`. Measured:
 scoring 300 submissions amortised is ~2.8× faster than re-checking each from
-scratch, and the gap widens with the rule-set size. This is the thesis's §6.1
-"up-front saturation cost and storage for fast checks at grading time".
+scratch, and the gap widens with the rule-set size. This trades up-front
+saturation cost and storage for fast checks at grading time.
 
 > Implementation note: reconstructing a flat proof from a *rich* saturated graph
 > can pick a stale path, so `replay_explanation` degrades gracefully (returns
@@ -255,11 +261,11 @@ only*; and it is *not yet wired into a production host*. Full, tagged breakdown
   rewriting *from* a bare variable; the e-graph union is symmetric regardless.
 - **Bounded saturation.** Bidirectional assoc/comm/distrib have no finite
   fixpoint, so saturation is run for a fixed number of iterations
-  (`DEFAULT_BOUND = 5`), not to convergence — the "termination/resource bound"
-  §6.3 calls for. The worked example's equivalence is found by iteration 3;
+  (`DEFAULT_BOUND = 5`), not to convergence — the required "termination/resource
+  bound". The worked example's equivalence is found by iteration 3;
   beyond ~5 the distributivity/AC blow-up dominates with no benefit. Larger or
   deeper expressions may need a different bound and will cost more — bounding
-  saturation predictably is the open risk the thesis names.
+  saturation predictably is the open risk here.
 - **Sound, not complete.** Equivalence grading is sound up to the rule theory
   and the bound. A `False` from `equivalent` means "not proven equal within the
   bound", not "provably unequal".

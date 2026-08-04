@@ -8,8 +8,8 @@ An instructor authoring an exercise already knows a solution.  Supplying it as a
     exponential global search (this is the scaling win -- landmarks bound the
     branching factor);
   * **hints** follow the instructor's *intended route* rather than the greedy
-    one-ply move the thesis criticises in Section B.4 ("clear the +0 first"
-    instead of "cancel because it removes the most structure");
+    one-ply move ("clear the +0 first" instead of "cancel because it removes
+    the most structure");
   * **partial credit** measures progress *along the reference* (how far the
     student has travelled toward the goal), not blind distance to the target;
   * the reference itself is **validated** -- each hop must be a real, bounded

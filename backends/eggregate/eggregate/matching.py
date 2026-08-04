@@ -2,14 +2,14 @@
 
 One implementation, shared by every consumer (the hint search, the step
 validator, and -- via compilation -- the egglog backend).  Keeping match/
-instantiate in a single place is the code-level form of the thesis's "shared
-rule source" principle (Section 4.3 / 9): a rule cannot match differently on
+instantiate in a single place is the code-level form of the "shared
+rule source" principle: a rule cannot match differently on
 the client and the server because there is only one matcher.
 
 Wildcards (block ``wild``, value = name) bind to whole subtrees, with
 consistency: the same wildcard name must bind the same subtree everywhere.
 There are no binders in the model, so structural equality is the only notion of
-sameness (no alpha-equivalence needed; see the thesis scope note).
+sameness (no alpha-equivalence needed).
 """
 from __future__ import annotations
 

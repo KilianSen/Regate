@@ -27,12 +27,12 @@ def test_pretty():
     assert pretty(SOURCE) == "(3·(x + 0))/(3·1)"
 
 
-def test_path_encoding_matches_thesis():
+def test_path_encoding_alphabetical_slots():
     # the inner sum x+0 sits at path [1,1] (numerator, then the mul's right child)
     assert pretty(SOURCE.at((1, 1))) == "x + 0"
 
 
-# -- distance metric (Table 7) ---------------------------------------------
+# -- distance metric --------------------------------------------------------
 def test_distance_metric_matches_table7():
     s1 = frac(mul(num(3), var("x")), mul(num(3), num(1)))   # after step 0
     s2 = frac(var("x"), num(1))                              # after step 1
@@ -42,7 +42,7 @@ def test_distance_metric_matches_table7():
     assert distance(TARGET, TARGET) == 0
 
 
-# -- equivalence grading (Section 4.4 / B.3) -------------------------------
+# -- equivalence grading ----------------------------------------------------
 def test_grading_is_path_independent():
     # two different valid endpoints, both x -> both full marks
     assert grade(X, TARGET, rules=AVAILABLE) == 100
@@ -60,7 +60,7 @@ def test_full_theory_equivalences():
     assert not equivalent(X, add(X, num(1)))
 
 
-# -- hints (Table 8 + the MS3 improvement) ---------------------------------
+# -- hints (+ the MS3 improvement) ------------------------------------------
 def test_greedy_hints_match_table8():
     hints = greedy_hints(SOURCE, TARGET, AVAILABLE, k=3)
     ids = [h.rule_id for h in hints]
@@ -76,7 +76,7 @@ def test_multistep_path_reaches_goal():
 
 
 def test_pedagogical_ordering_available():
-    # MS3 can choose a plan that clears the +0 first (the thesis's example)
+    # MS3 can choose a plan that clears the +0 first
     plans = all_shortest_paths(SOURCE, TARGET, AVAILABLE)
     assert any(p[0].rule_id == "add_zero_right" for p in plans)
 
@@ -127,7 +127,7 @@ def test_type_b_rejects_non_matching_occurrence():
 
 
 # -- whole-proof verification (no e-graph; transitivity over a sound chain) --
-def test_verify_chain_replays_thesis_derivation():
+def test_verify_chain_replays_reference_derivation():
     moves = [
         Move("A", (1, 1), rule=BY_ID["add_zero_right"]),
         Move("A", (),     rule=BY_ID["frac_mul_cancel_left"]),
@@ -293,7 +293,7 @@ def test_service_target_form_is_full_marks():
 def test_service_unsimplified_equivalent_gets_partial_not_full():
     from eggregate.model import to_json, frac as F
     assert _gr(final=to_json(SOURCE))["score"] == 0        # source unchanged: no credit
-    assert _gr(final=to_json(F(X, num(1))))["score"] == 75  # x/1: thesis distance formula
+    assert _gr(final=to_json(F(X, num(1))))["score"] == 75  # x/1: distance formula
 
 
 def test_service_wrong_answer_is_zero_with_witness():

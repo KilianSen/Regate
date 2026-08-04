@@ -1,4 +1,4 @@
-"""Side conditions for guarded rules (thesis Section 5 "where soundness lives").
+"""Side conditions for guarded rules -- where soundness lives.
 
 Many school identities are *conditional* -- ``x/x = 1`` needs ``x != 0``,
 ``a/(b) `` needs ``b != 0``, taking a root needs non-negativity, and so on.
@@ -15,8 +15,8 @@ that a failed equality check is ambiguous):
   * ``OPEN``       -- undecided; the student must discharge it (open decision #3:
     a declared assumption, a spawned sub-goal, or a context check).
 
-This generalises the single ``NotEqualToConstant`` the thesis ships today
-(Section 6.3) to a small, extensible vocabulary.
+This generalises the single ``NotEqualToConstant`` shipped today
+to a small, extensible vocabulary.
 """
 from __future__ import annotations
 

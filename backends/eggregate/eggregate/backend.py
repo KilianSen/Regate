@@ -1,17 +1,17 @@
-"""The e-graph reasoning backend (thesis Section 4.5 / 5.7, milestone MS3).
+"""The e-graph reasoning backend (milestone MS3).
 
-This is the "second engine" of Section 4.3.  It compiles the shared rule
+This is the "second engine".  It compiles the shared rule
 catalogue (``catalogue.py``) into an egglog ruleset, runs *bounded* equality
-saturation (Section 6.3: saturation needs termination/resource bounds), and
+saturation (which needs termination/resource bounds), and
 answers two questions:
 
   * ``equivalent(s, t)`` / ``grade(...)`` -- are two expressions in the same
     e-class?  This is equivalence-based grading: it accepts *any* valid
-    derivation, not just a replay of one stored chain (Section 4.4 / B.3).
+    derivation, not just a replay of one stored chain.
 
   * ``EGraphView`` -- the saturated e-graph itself, so a hint can rank a whole
-    path to the goal rather than a single next move (Section B.4), and so the
-    e-class can be dumped (the illustrative figure the B.4 TODO asks for).
+    path to the goal rather than a single next move, and so the
+    e-class can be dumped.
 
 The compilation is what makes "single shared rule source, two engines" literal:
 forward (F) rules become a one-directional ``rewrite``; bidirectional (B) rules
@@ -205,8 +205,8 @@ THEORY = build_ruleset()
 
 # Bounded saturation: bidirectional assoc/comm/distrib have no finite fixpoint
 # and the e-graph grows combinatorially, so we run a fixed number of iterations
-# instead of saturate().  This is the "termination/resource bound" MS3 requires
-# (Section 6.3).  Empirically the worked example's equivalence is found by
+# instead of saturate().  This is the "termination/resource bound" MS3 requires.
+# Empirically the worked example's equivalence is found by
 # iteration 3; beyond ~5 the distributivity/AC blow-up dominates with no benefit,
 # so 5 is a safe default for small classroom expressions.  Raise it per call only
 # when an exercise genuinely needs deeper rewriting, and expect cost to climb.
@@ -368,6 +368,6 @@ def grade(student_final: MathNode, target: MathNode,
 
     Path-independent -- unlike RewriteChainGrader it does not replay or even look
     at the intermediate steps; it asks only whether the endpoints coincide in the
-    saturated e-graph (thesis Section 4.4, the second grader bean).
+    saturated e-graph (the second grader bean).
     """
     return 100 if equivalent(student_final, target, rules=rules, bound=bound) else 0

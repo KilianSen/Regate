@@ -1,4 +1,4 @@
-"""The built-in sample ruleset (thesis Table 4 / Appendix A).
+"""The built-in sample ruleset.
 
 The rule *representation* and the wire (de)serialization live in ``rule.py`` --
 that is the contract the engine and the grading request depend on.  This module
@@ -24,7 +24,7 @@ from .rule import (  # noqa: F401  (re-exported for back-compat)
 a, b, c, d = wild("a"), wild("b"), wild("c"), wild("d")
 
 
-# Table 4, verbatim.  F = forward-only, B = bidirectional.
+# F = forward-only, B = bidirectional.
 CATALOGUE: list[Rule] = [
     # -- Add -------------------------------------------------------------
     Rule("add_comm",       "add", add(a, b), add(b, a), bidir=True),
