@@ -35,7 +35,7 @@ python3 bench_v2.py 5                # just one; results MERGE into the json
 
 `bench_v2.py` holds 1–5, `bench_v3.py` holds 6–9; both merge into the same results file.
 
-## Three things to know before quoting a number
+## Four things to know before quoting a number
 
 **Carrying vs saturating.** The per-rule cost differs by ~90x depending on regime: ~30 µs to CARRY a
 rule that is parsed and never matched (measurement 7 — the number behind "an instructor can grow the
@@ -47,6 +47,18 @@ magnitude; this is what made the old 37 µs and 2.7 ms figures look irreconcilab
 in `proof_egraph.saturate` truncates the work, so t/R falls (590 µs at R = 10 005). That is the
 resource bound biting, NOT better scaling. Quote the linear regime, or mark those rows.
 
+
+**A plateau is not a fixpoint, and convergence belongs in the caption.** Measurement 3 used to derive
+iterations-to-fixpoint from "the e-node count stopped growing", which cannot tell convergence from
+starvation: once a round's match collection is truncated to the budget, the run applies only a
+redundant prefix, nothing changes, and the count flattens. That produced a published table in which
+m = 3 reached no fixpoint within bound 8 while the strictly larger m = 4 "converged" at round 7 —
+backwards, because the faster-growing term starves sooner. Traced: at m = 4 the truncated round saw
+60 000 of **867 767** matches; with the match budget raised, round 6 grows 23 604 → 60 001 e-nodes
+instead of flattening. `saturate` now returns its stop reason and reports `starved` rather than
+`fixpoint` when the match set was incomplete, so only m = 1 (1 iteration) and m = 2 (5) claim
+convergence. Note also that the fixpoint is a property of the TERM: never print it as a per-row
+column, where it appears on rows whose own bound is smaller than the fixpoint it names.
 
 **Which engine.** eggregate has two: the hand-written `ProofEGraph` (~2.7 ms/rule) and the
 egglog-compiled oracle behind `backend.equivalent` (~1.1 ms/rule). They differ by 2.5×, so any

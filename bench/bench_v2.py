@@ -215,24 +215,29 @@ def m3_saturation_grid():
 
     print(f"\n=== 3. SATURATION GRID, all cells (full catalogue, cutoff = {CUTOFF_S:g} s) ===")
     print("Every cell of m ∈ {1,2,3,4} × bound ∈ {2,4,6,8} is reported, including cells that hit a")
-    print("limit — previously only three were published. `saturate` exposes no iteration counter, so")
-    print("iterations-to-fixpoint is DERIVED: bounds 1..8 are swept per m and the fixpoint is the first")
-    print("bound at which the e-node count stops growing. `nodes` is that cell's e-node count; the cap")
-    print(f"is ProofEGraph's own max_nodes={MAX_NODES}.")
+    print("limit — previously only three were published. Convergence is a property of the TERM, not of")
+    print("an individual capped run, so it is reported once per m below the block and never as a column")
+    print("on a row whose own bound is smaller than the fixpoint. `saturate` now returns its stop reason,")
+    print("so a fixpoint is claimed only when a round fired nothing off a COMPLETE match set: a run whose")
+    print("match collection was truncated reports `starved`, which looks identical in the node counts")
+    print(f"but is not convergence. `nodes` is that cell's e-node count; the cap is max_nodes={MAX_NODES},")
+    print("which also bounds matches collected per round.")
     print(f"\n{'m':>3}{'bound':>7}{'e-nodes':>10}{'median (ms)':>14}{'min–max (ms)':>26}{'n':>5}  status")
 
-    rows = []
+    rows, summaries = [], []
     for m in [1, 2, 3, 4]:
         term = prod_of_sums(m)
 
-        # Untimed probe sweep over bounds 1..8: node counts give iterations-to-fixpoint.
-        counts, probe_times, aborted = {}, {}, None
+        # Untimed probe sweep over bounds 1..8. The stop reason — not the node count — decides
+        # whether the term converged: equal counts on consecutive bounds happen just as readily
+        # when the match budget starved the round.
+        counts, recs, probe_times, aborted = {}, {}, {}, None
         for b in range(1, 9):
             eg = ProofEGraph()
             eg.add_term(term)
             t0 = time.perf_counter()
             try:
-                eg.saturate(dr, b)
+                recs[b] = eg.saturate(dr, b)
             except Exception as e:                       # noqa: BLE001
                 aborted = f"{type(e).__name__}: {str(e)[:40]}"
                 break
@@ -242,12 +247,15 @@ def m3_saturation_grid():
                 aborted = f"cutoff >{CUTOFF_S:g}s at bound {b}"
                 break
 
+        # The first bound whose run genuinely converged; `rounds - 1` iterations sufficed, since
+        # the final round is the one that fired nothing.
         fixpoint = None
-        for b in sorted(counts):
-            if b > 1 and counts[b] == counts[b - 1]:
-                fixpoint = b - 1
+        for b in sorted(recs):
+            if recs[b]["stop"] == "fixpoint":
+                fixpoint = recs[b]["rounds"] - 1
                 break
-        capped = any(v >= MAX_NODES for v in counts.values())
+        truncated_from = next((b for b in sorted(recs) if recs[b]["truncated"]), None)
+        node_capped = any(r["stop"] == "node_cap" for r in recs.values())
 
         for b in [2, 4, 6, 8]:
             if b not in counts:
@@ -261,22 +269,34 @@ def m3_saturation_grid():
                 eg.saturate(dr, b)
 
             s = measure(once, cap_s=CUTOFF_S)
-            status = []
-            if fixpoint is not None and b >= fixpoint:
-                status.append(f"fixpoint@{fixpoint}")
-            else:
-                status.append("bound-limited")
-            if counts[b] >= MAX_NODES:
-                status.append("NODE-CAPPED")
-            rows.append({"m": m, "bound": b, "nodes": counts[b], "fixpoint": fixpoint,
-                         "node_capped": counts[b] >= MAX_NODES, **s})
+            # Per-ROW status describes only this run: did it converge, or was it cut short, and by
+            # what. It never repeats the term's fixpoint — that belongs to the block summary.
+            stop = recs[b]["stop"]
+            status = {"fixpoint": "converged", "starved": "starved (match budget)",
+                      "node_cap": "node-capped", "bound": "bound-limited",
+                      "connected": "connected"}[stop]
+            if recs[b]["truncated"] and stop != "starved":
+                status += ", matches truncated"
+            rows.append({"m": m, "bound": b, "nodes": counts[b], "stop": stop,
+                         "truncated": recs[b]["truncated"], **s})
             print(f"{m:>3}{b:>7}{counts[b]:>10}{s['median']*1000:>14.1f}"
                   f"{f'{s["min"]*1000:.1f} – {s["max"]*1000:.1f}':>26}"
-                  f"{s['n']:>5}  {', '.join(status)}")
-        print(f"    m={m}: node counts by bound {counts}"
-              + (f", fixpoint at {fixpoint} iterations" if fixpoint else ", no fixpoint within bound 8")
-              + (f", {aborted}" if aborted else "") + (", MAX_NODES hit" if capped else ""))
+                  f"{s['n']:>5}  {status}")
+
+        if fixpoint is not None:
+            verdict = f"fixpoint at {fixpoint} iterations"
+        elif truncated_from is not None:
+            verdict = (f"NO fixpoint within bound 8 — match collection truncated from bound "
+                       f"{truncated_from}, so the node counts from there on are starved, not converging")
+        else:
+            verdict = "no fixpoint within bound 8"
+        summaries.append({"m": m, "counts": counts, "fixpoint": fixpoint,
+                          "truncated_from": truncated_from, "node_capped": node_capped,
+                          "aborted": aborted, "verdict": verdict})
+        print(f"    m={m}: node counts by bound {counts}, {verdict}"
+              + (f", {aborted}" if aborted else "") + (", node cap hit" if node_capped else ""))
     RESULTS["m3_saturation_grid"] = rows
+    RESULTS["m3_convergence_by_term"] = summaries
 
 
 # ── 4. the abstention matrix ─────────────────────────────────────────────────

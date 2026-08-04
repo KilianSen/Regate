@@ -212,7 +212,7 @@ class ProofEGraph:
     def saturate(self, drules: list[Directed], bound: int,
                  connect: tuple[int, int] | None = None,
                  max_nodes: int = 60_000,
-                 assumptions: frozenset = frozenset()) -> None:
+                 assumptions: frozenset = frozenset()) -> dict:
         """Run bounded equality saturation.
 
         If ``connect=(a, b)`` is given, stop as soon as the two are in the same
@@ -221,11 +221,30 @@ class ProofEGraph:
         ``max_nodes`` is a hard resource bound (the thesis's Section 6.3 concern).
         ``assumptions`` are the exercise's declared facts, which is what lets a
         guarded rule fire on a symbolic binding (``x/x -> 1`` under ``x != 0``).
+
+        Returns a record of WHY the run ended, because "the e-node count stopped
+        growing" is not by itself evidence of convergence:
+
+        ``stop``       ``connected`` | ``fixpoint`` | ``starved`` | ``node_cap`` | ``bound``
+        ``rounds``     iterations actually run
+        ``truncated``  some round's match collection hit the budget below
+
+        ``fixpoint`` means no rewrite fired from a COMPLETE match set. When the
+        match list was truncated, a round in which nothing fired only says the
+        collected prefix was redundant, so that case reports ``starved`` instead --
+        measured: at m=4 the truncated run saw 60_000 of 867_767 matches and looked
+        converged at round 7, while the untruncated round 6 grew 23_604 -> 60_001
+        e-nodes. Callers reporting iterations-to-fixpoint must reject ``starved``.
         """
         self.rebuild()
         if connect and self.find(connect[0]) == self.find(connect[1]):
-            return
+            return {"stop": "connected", "rounds": 0, "truncated": False,
+                    "nodes": len(self.nodes)}
+        truncated = False
+        stop = "bound"
+        rounds = 0
         for _ in range(bound):
+            rounds += 1
             members = self.members()
             # The match list is bounded too. Collecting every match before applying any of them
             # is its own memory sink, independent of graph growth: matches scale as
@@ -236,9 +255,11 @@ class ProofEGraph:
             applications = []
             for dr in drules:
                 if len(applications) >= app_budget:
+                    truncated = True
                     break
                 for i in range(len(self.nodes)):
                     if len(applications) >= app_budget:
+                        truncated = True
                         break
                     for subst in self._match_node(dr.pattern, i, {}, members):
                         if dr.conditions and not _guards_ok(dr, subst, self.term_of,
@@ -246,6 +267,7 @@ class ProofEGraph:
                             continue
                         applications.append((dr, i, subst))
                         if len(applications) >= app_budget:
+                            truncated = True
                             break
             did = False
             for dr, i, subst in applications:
@@ -266,9 +288,18 @@ class ProofEGraph:
                     did = True
             self.rebuild()
             if connect and self.find(connect[0]) == self.find(connect[1]):
+                stop = "connected"
                 break
-            if not did or len(self.nodes) > max_nodes:
+            # Order matters: the node cap is the stronger claim, so it is checked first. A round
+            # that fired nothing off a truncated match list is `starved`, never `fixpoint`.
+            if len(self.nodes) > max_nodes:
+                stop = "node_cap"
                 break
+            if not did:
+                stop = "starved" if truncated else "fixpoint"
+                break
+        return {"stop": stop, "rounds": rounds, "truncated": truncated,
+                "nodes": len(self.nodes)}
 
     # -- provenance path --------------------------------------------------
     def _path(self, a: int, b: int):
