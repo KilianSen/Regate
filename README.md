@@ -19,6 +19,8 @@ for the plug-in guide.
 > [Artemis](https://github.com/ls1intum/Artemis) is the **reference adopter** —
 > the MathNode JSON is deliberately compatible with its persisted format — but
 > nothing here depends on Artemis, and the contract is platform-neutral.
+> For the thesis hand-in, including how to run Artemis with these backends attached, see
+> [`ABGABE.md`](https://github.com/KilianSen/Artemis/blob/Abgabe/ABGABE.md) on the submission branch.
 
 | Backend | Engine | Scope | Notes |
 |---|---|---|---|
